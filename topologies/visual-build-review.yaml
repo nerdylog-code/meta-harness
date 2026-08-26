@@ -1,0 +1,27 @@
+name: visual-build-review
+version: "1"
+kind: sequence
+nodes:
+  - id: visual-observer
+    type: agent
+    role: visual-reviewer
+    engine: hermes
+    capabilities:
+      - vision.image
+  - id: builder
+    type: agent
+    role: builder
+    engine: hermes
+  - id: visual-reviewer
+    type: agent
+    role: visual-reviewer
+    engine: hermes
+    capabilities:
+      - vision.screenshot
+edges:
+  - from: visual-observer
+    to: builder
+  - from: builder
+    to: visual-reviewer
+limits:
+  retries: 3

@@ -1,0 +1,105 @@
+{
+  "id": "default",
+  "name": "Default Cast",
+  "version": "1.0.0",
+  "renderer": "procedural",
+  "tile": { "width": 32, "height": 48 },
+  "characters": [
+    {
+      "id": "architect",
+      "name": "Architect",
+      "sprite": "architect.svg",
+      "anchor": [0.5, 1.0],
+      "scale": 1.0,
+      "palette": { "primary": "#4a78c8", "secondary": "#2c4f8c", "accent": "#f5c84a" },
+      "animations": {
+        "idle":          { "frames": [0] },
+        "walk_south":    { "frames": [0, 1], "fps": 6 },
+        "walk_north":    { "frames": [0, 1], "fps": 6 },
+        "walk_east":     { "frames": [0, 1], "fps": 6 },
+        "walk_west":     { "frames": [0, 1], "fps": 6 },
+        "thinking":      { "frames": [0], "fps": 1 },
+        "working_file":  { "frames": [0], "fps": 1 },
+        "working_terminal": { "frames": [0], "fps": 1 },
+        "working_web":   { "frames": [0], "fps": 1 },
+        "delegating":    { "frames": [0], "fps": 1 },
+        "validating":    { "frames": [0], "fps": 1 },
+        "blocked":       { "frames": [0], "fps": 1 },
+        "success":       { "frames": [0], "fps": 1 },
+        "error":         { "frames": [0], "fps": 1 }
+      }
+    },
+    {
+      "id": "builder",
+      "name": "Builder",
+      "sprite": "builder.svg",
+      "anchor": [0.5, 1.0],
+      "scale": 1.0,
+      "palette": { "primary": "#d97a3c", "secondary": "#a85523", "accent": "#f5c84a" },
+      "animations": {
+        "idle":          { "frames": [0] },
+        "walk_south":    { "frames": [0, 1], "fps": 6 },
+        "walk_north":    { "frames": [0, 1], "fps": 6 },
+        "walk_east":     { "frames": [0, 1], "fps": 6 },
+        "walk_west":     { "frames": [0, 1], "fps": 6 },
+        "thinking":      { "frames": [0], "fps": 1 },
+        "working_file":  { "frames": [0], "fps": 1 },
+        "working_terminal": { "frames": [0], "fps": 1 },
+        "working_web":   { "frames": [0], "fps": 1 },
+        "delegating":    { "frames": [0], "fps": 1 },
+        "validating":    { "frames": [0], "fps": 1 },
+        "blocked":       { "frames": [0], "fps": 1 },
+        "success":       { "frames": [0], "fps": 1 },
+        "error":         { "frames": [0], "fps": 1 }
+      }
+    },
+    {
+      "id": "validator",
+      "name": "Validator",
+      "sprite": "validator.svg",
+      "anchor": [0.5, 1.0],
+      "scale": 1.0,
+      "palette": { "primary": "#3ca870", "secondary": "#226a48", "accent": "#f5c84a" },
+      "animations": {
+        "idle":          { "frames": [0] },
+        "walk_south":    { "frames": [0, 1], "fps": 6 },
+        "walk_north":    { "frames": [0, 1], "fps": 6 },
+        "walk_east":     { "frames": [0, 1], "fps": 6 },
+        "walk_west":     { "frames": [0, 1], "fps": 6 },
+        "thinking":      { "frames": [0], "fps": 1 },
+        "working_file":  { "frames": [0], "fps": 1 },
+        "working_terminal": { "frames": [0], "fps": 1 },
+        "working_web":   { "frames": [0], "fps": 1 },
+        "delegating":    { "frames": [0], "fps": 1 },
+        "validating":    { "frames": [0], "fps": 1 },
+        "blocked":       { "frames": [0], "fps": 1 },
+        "success":       { "frames": [0], "fps": 1 },
+        "error":         { "frames": [0], "fps": 1 }
+      }
+    },
+    {
+      "id": "reviewer",
+      "name": "Reviewer",
+      "sprite": "reviewer.svg",
+      "anchor": [0.5, 1.0],
+      "scale": 1.0,
+      "palette": { "primary": "#8a4ac8", "secondary": "#5c2a8c", "accent": "#f5c84a" },
+      "animations": {
+        "idle":          { "frames": [0] },
+        "walk_south":    { "frames": [0, 1], "fps": 6 },
+        "walk_north":    { "frames": [0, 1], "fps": 6 },
+        "walk_east":     { "frames": [0, 1], "fps": 6 },
+        "walk_west":     { "frames": [0, 1], "fps": 6 },
+        "thinking":      { "frames": [0], "fps": 1 },
+        "working_file":  { "frames": [0], "fps": 1 },
+        "working_terminal": { "frames": [0], "fps": 1 },
+        "working_web":   { "frames": [0], "fps": 1 },
+        "delegating":    { "frames": [0], "fps": 1 },
+        "validating":    { "frames": [0], "fps": 1 },
+        "blocked":       { "frames": [0], "fps": 1 },
+        "success":       { "frames": [0], "fps": 1 },
+        "error":         { "frames": [0], "fps": 1 }
+      }
+    }
+  ]
+}

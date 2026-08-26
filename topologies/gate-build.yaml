@@ -1,0 +1,17 @@
+name: gate-build
+version: "1"
+kind: gate
+nodes:
+  - id: builder
+    type: agent
+    role: builder
+    engine: hermes
+  - id: validator
+    type: agent
+    role: validator
+    engine: hermes
+edges:
+  - from: builder
+    to: validator
+limits:
+  retries: 3

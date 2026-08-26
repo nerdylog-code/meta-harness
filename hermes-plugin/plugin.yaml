@@ -1,0 +1,34 @@
+name: meta-harness
+version: "0.1.0"
+description: "Meta-Harness — capability-first multi-agent orchestration layer for Hermes."
+author: "Meta-Harness"
+kind: standalone
+manifest_version: 2
+provides_hooks:
+  - pre_tool_call
+  - post_tool_call
+  - pre_api_request
+  - post_api_request
+  - on_session_start
+  - on_session_end
+
+# Meta-Harness never overrides host tools, so capabilities here are
+# informational and never require grant. They are kept for forward
+# compatibility when the host gains a richer capability gate.
+config_schema:
+  data_dir:
+    type: str
+    default: ""
+    description: "Override the plugin data directory (default: <HERMES_HOME>/meta-harness)."
+  enable_desktop_routes:
+    type: str
+    default: "true"
+    description: "Whether to mount /api/plugins/meta-harness routes (true|false)."
+  enable_event_capture:
+    type: str
+    default: "true"
+    description: "Whether to mirror host tool/api events into the harness event store (true|false)."
+  redaction:
+    type: str
+    default: "true"
+    description: "Redact common credential patterns before persisting events (true|false)."

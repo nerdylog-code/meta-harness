@@ -1,0 +1,14 @@
+{
+  "name": "meta-harness",
+  "label": "Meta-Harness",
+  "description": "Self-extensible multi-agent meta-harness — capability router, event plane, animation, plugin lab.",
+  "icon": "Rocket",
+  "version": "0.1.0",
+  "tab": {
+    "path": "/meta-harness",
+    "position": "after:kanban"
+  },
+  "entry": "plugin.js",
+  "css": "style.css",
+  "api": "plugin_api.py"
+}

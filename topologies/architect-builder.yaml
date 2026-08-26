@@ -1,0 +1,16 @@
+name: architect-builder
+version: "1"
+kind: sequence
+nodes:
+  - id: architect
+    type: agent
+    role: architect
+    engine: hermes
+  - id: builder
+    type: agent
+    role: builder
+    engine: hermes
+edges:
+  - from: architect
+    to: builder
+limits: {}

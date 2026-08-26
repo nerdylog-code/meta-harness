@@ -1,0 +1,10 @@
+name: solo
+version: "1"
+kind: solo
+nodes:
+  - id: agent
+    type: agent
+    role: builder
+    engine: hermes
+edges: []
+limits: {}

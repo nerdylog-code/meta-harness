@@ -1,0 +1,25 @@
+name: fusion
+version: "1"
+kind: parallel
+nodes:
+  - id: alpha
+    type: agent
+    role: architect
+    engine: hermes
+  - id: beta
+    type: agent
+    role: reviewer
+    engine: hermes
+  - id: synthesis
+    type: agent
+    role: builder
+    engine: hermes
+edges:
+  - from: alpha
+    to: synthesis
+  - from: beta
+    to: synthesis
+limits: {}
+# NOTE: parallel writers are isolated into separate git worktrees via the
+# workspace contract in ADR-0009. MVP keeps this declarative — execution
+# code lives in topology.py.
