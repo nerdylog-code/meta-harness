@@ -85,6 +85,19 @@ else
   fail=$((fail+1))
 fi
 
+# Desktop plugin load simulation — catches missing SDK exports like
+# QueryClient/TabsContent that would make Hermes Desktop fail at load.
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+py="$(command -v python3 || command -v python || true)"
+if [[ -n "$py" && -f "$repo/scripts/check_plugin_load.py" ]]; then
+  if (cd "$repo" && "$py" scripts/check_plugin_load.py >/dev/null 2>&1); then
+    echo "[PASS] Desktop plugin loads (register() ran)"
+  else
+    echo "[FAIL] Desktop plugin fails to load — see 'python scripts/check_plugin_load.py'"
+    fail=$((fail+1))
+  fi
+fi
+
 # Config patch
 if [[ -f "$HERMES_HOME/config.yaml" ]]; then
   if grep -q "meta-harness" "$HERMES_HOME/config.yaml"; then

@@ -18,13 +18,11 @@
 import {
   Button,
   cn,
-  Codicon,
   EmptyState,
   ErrorState,
   GlyphSpinner,
   host,
   PALETTE_AREA,
-  QueryClient,
   queryClient,
   ROUTES_AREA,
   SIDEBAR_NAV_AREA,
@@ -33,7 +31,6 @@ import {
   Tabs,
   TabsList,
   TabsTrigger,
-  TabsContent,
   Textarea,
   Select,
   SelectContent,
@@ -43,7 +40,6 @@ import {
   Tip,
   useMutation,
   useQuery,
-  useValue,
 } from '@hermes/plugin-sdk'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { jsx, jsxs, Fragment } from 'react/jsx-runtime'
@@ -222,46 +218,25 @@ function CommandCenter() {
                 jsxs('div', {
                   className: 'flex-1 min-h-0 overflow-auto',
                   children: [
-                    jsx(TabsContent, {
-                      value: 'run',
-                      children: jsx(RunPanel, {
+                    jsx('div', { 'data-tab': 'run', className: cn('flex-1 min-h-0 overflow-auto', tab !== 'run' && 'hidden'), children: jsx(RunPanel, {
                         topologies: topologies.data?.topologies || [],
                         engines: { hermes: engineHermes, pi: enginePi },
                         model: fallbackModel,
                         onRunCreated: (id) => { setActiveRunId(id); setTab('agents') },
-                      }),
-                    }),
-                    jsx(TabsContent, {
-                      value: 'agents',
-                      children: jsx(AgentsPanel, {
+                      }), }),
+                    jsx('div', { 'data-tab': 'agents', className: cn('flex-1 min-h-0 overflow-auto', tab !== 'agents' && 'hidden'), children: jsx(AgentsPanel, {
                         runId: activeRunId,
                         runs: runs.data?.runs || [],
                         onSelect: setActiveRunId,
-                      }),
-                    }),
-                    jsx(TabsContent, {
-                      value: 'graph',
-                      children: jsx(GraphPanel, { runId: activeRunId }),
-                    }),
-                    jsx(TabsContent, {
-                      value: 'timeline',
-                      children: jsx(TimelinePanel, { runId: activeRunId }),
-                    }),
-                    jsx(TabsContent, {
-                      value: 'office',
-                      children: jsx(OfficePanel, {
+                      }), }),
+                    jsx('div', { 'data-tab': 'graph', className: cn('flex-1 min-h-0 overflow-auto', tab !== 'graph' && 'hidden'), children: jsx(GraphPanel, { runId: activeRunId }), }),
+                    jsx('div', { 'data-tab': 'timeline', className: cn('flex-1 min-h-0 overflow-auto', tab !== 'timeline' && 'hidden'), children: jsx(TimelinePanel, { runId: activeRunId }), }),
+                    jsx('div', { 'data-tab': 'office', className: cn('flex-1 min-h-0 overflow-auto', tab !== 'office' && 'hidden'), children: jsx(OfficePanel, {
                         runId: activeRunId,
                         packId: packs.data?.active,
-                      }),
-                    }),
-                    jsx(TabsContent, {
-                      value: 'plugins',
-                      children: jsx(PluginsPanel, {}),
-                    }),
-                    jsx(TabsContent, {
-                      value: 'characters',
-                      children: jsx(CharactersPanel, {}),
-                    }),
+                      }), }),
+                    jsx('div', { 'data-tab': 'plugins', className: cn('flex-1 min-h-0 overflow-auto', tab !== 'plugins' && 'hidden'), children: jsx(PluginsPanel, {}), }),
+                    jsx('div', { 'data-tab': 'characters', className: cn('flex-1 min-h-0 overflow-auto', tab !== 'characters' && 'hidden'), children: jsx(CharactersPanel, {}), }),
                   ],
                 }),
               ],
