@@ -9,10 +9,10 @@ node_modules/
 .DS_Store
 Thumbs.db
 
-.vscode/
-.idea/
-
 # generated runtime data lives outside the repo
 /generated/
 /dist/
 /build/
+
+# the render-test npm sandbox (installed on demand by check_plugin_render.py)
+scripts/node_modules/

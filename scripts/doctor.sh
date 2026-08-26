@@ -98,6 +98,18 @@ if [[ -n "$py" && -f "$repo/scripts/check_plugin_load.py" ]]; then
   fi
 fi
 
+# Render test — actually mounts the CommandCenter under React+jsdom.
+# Catches runtime errors that load-time inspection misses: undefined
+# imports used inside JSX, missing React keys, broken state machines.
+if [[ -n "$py" && -f "$repo/scripts/check_plugin_render.py" ]]; then
+  if (cd "$repo" && timeout 60 "$py" scripts/check_plugin_render.py >/dev/null 2>&1); then
+    echo "[PASS] Desktop plugin renders (CommandCenter mounts without exceptions)"
+  else
+    echo "[WARN] Desktop render test failed — see 'python scripts/check_plugin_render.py'"
+    warn=$((warn+1))
+  fi
+fi
+
 # Config patch
 if [[ -f "$HERMES_HOME/config.yaml" ]]; then
   if grep -q "meta-harness" "$HERMES_HOME/config.yaml"; then
