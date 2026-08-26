@@ -39,8 +39,9 @@ mkdir -p "$HERMES_HOME/plugins/meta-harness"
 mkdir -p "$HERMES_HOME/desktop-plugins/meta-harness"
 mkdir -p "$HERMES_HOME/meta-harness"
 
-# Backend plugin
-cp -r "$ROOT/hermes-plugin/." "$HERMES_HOME/plugins/meta-harness/"
+# Backend plugin — copy contents, skipping bytecode caches so we don't
+# ship __pycache__ into the user's Hermes install.
+(cd "$ROOT/hermes-plugin" && find . -type f -not -name "*.pyc" -not -name "*.pyo" -print0 | xargs -0 -I {} cp --parents "{}" "$HERMES_HOME/plugins/meta-harness/")
 echo "[ok] backend plugin -> $HERMES_HOME/plugins/meta-harness"
 
 # Desktop plugin (only the JS — the backend uses its own copy).

@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+node_modules/
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
+
+# generated runtime data lives outside the repo
+/generated/
+/dist/
+/build/
