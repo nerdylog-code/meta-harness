@@ -1,21 +1,22 @@
 # Reconnaissance — actual installed Hermes Agent
 
-> Findings that affect Meta-Harness implementation. Recorded against the
-> installed local copy at `C:\Users\ENM\AppData\Local\hermes\hermes-agent\`.
-> Verified August 2026.
+> Findings that affect Meta-Harness implementation. This is a historical reconnaissance
+> snapshot; paths are intentionally environment-neutral. Re-run the commands below
+> against the target host before relying on a version or plugin detail.
+> The audit host used for this portfolio currently reports Hermes Agent `0.21.3`.
 
 ## Versions discovered
 
 | Component | Version | Path |
 |---|---|---|
-| Hermes Agent | `0.20.4` (2026.8.18) | `~/.local/hermes/hermes-agent` |
-| Python (venv) | `3.11.15` | `~/.local/hermes/hermes-agent/venv/` |
+| Hermes Agent | `0.20.4` (historical snapshot) | `$HERMES_HOME/hermes-agent` |
+| Python (venv) | `3.11.15` (historical snapshot) | `$HERMES_HOME/hermes-agent/venv/` |
 | OpenAI SDK | `2.24.0` | inside venv |
-| Pi Coding Agent | `0.81.1` | `/c/Users/ENM/AppData/Roaming/npm/pi` |
-| Hermes Home | `C:\Users\ENM\AppData\Local\hermes` | env `HERMES_HOME` |
-| Hermes Dashboard data dir | `C:\Users\ENM\AppData\Roaming\hermes` | env `APPDATA/hermes` |
+| Pi Coding Agent | `0.81.1` (historical snapshot) | `$APPDATA/npm/pi` |
+| Hermes Home | environment-specific | env `HERMES_HOME` |
+| Hermes Dashboard data dir | environment-specific | env `APPDATA/hermes` |
 
-`hermes` is on PATH (`~/.local/hermes/hermes-agent/venv/Scripts/hermes`).
+`hermes` is expected to be on `PATH`; use `hermes --version` to verify the active installation.
 
 ## Hermes plugin contract (real)
 
@@ -170,7 +171,7 @@ Implication for Meta-Harness:
 ## Verification commands
 
 ```bash
-hermes --version                  # 0.20.4
+hermes --version                  # re-check the active host version
 pi --version                      # 0.81.1
 hermes plugins list               # enumerates user + bundled plugins
 ```
