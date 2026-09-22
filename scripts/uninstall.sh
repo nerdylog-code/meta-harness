@@ -31,7 +31,11 @@ rm -rf "$HERMES_HOME/desktop-plugins/meta-harness" || true
 # Strip the meta-harness block from config.yaml. We only remove lines that
 # match the entries.meta-harness tree. Other entries are preserved.
 if [[ -f "$CONFIG" ]]; then
-  python3 - "$CONFIG" <<'PY'
+  config_arg="$CONFIG"
+  if command -v cygpath >/dev/null 2>&1; then
+    config_arg="$(cygpath -w "$CONFIG")"
+  fi
+  python3 - "$config_arg" <<'PY'
 import sys, re, pathlib
 p = pathlib.Path(sys.argv[1])
 text = p.read_text(encoding="utf-8")

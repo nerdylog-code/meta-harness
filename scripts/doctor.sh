@@ -5,12 +5,17 @@
 
 set -uo pipefail
 
-if [[ -n "${HERMES_HOME:-}" ]]; then
-  HERMES_HOME="${HERMES_HOME%/}"
-elif [[ $# -ge 1 ]]; then
+if [[ $# -ge 1 ]]; then
   HERMES_HOME="${1%/}"
+elif [[ -n "${HERMES_HOME:-}" ]]; then
+  HERMES_HOME="${HERMES_HOME%/}"
 else
   HERMES_HOME="$HOME/.hermes"
+fi
+
+# Keep relative diagnostic targets stable when the script changes directory for probes.
+if [[ -d "$HERMES_HOME" ]]; then
+  HERMES_HOME="$(cd "$HERMES_HOME" && pwd)"
 fi
 
 fail=0

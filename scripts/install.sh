@@ -26,6 +26,10 @@ if [[ ! -d "$HERMES_HOME" ]]; then
   exit 1
 fi
 
+# Normalize before the subshell below changes directory. This keeps relative
+# Hermes-home arguments working with Git Bash as well as POSIX shells.
+HERMES_HOME="$(cd "$HERMES_HOME" && pwd)"
+
 BACKUP_DIR="$HERMES_HOME/backups"
 mkdir -p "$BACKUP_DIR"
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -52,7 +56,11 @@ echo "[ok] desktop plugin -> $HERMES_HOME/desktop-plugins/meta-harness"
 if [[ -f "$CONFIG" ]]; then
   if grep -q "^plugins:" "$CONFIG"; then
     if ! grep -q "meta-harness" "$CONFIG"; then
-      python3 - "$CONFIG" <<'PY'
+      config_arg="$CONFIG"
+      if command -v cygpath >/dev/null 2>&1; then
+        config_arg="$(cygpath -w "$CONFIG")"
+      fi
+      python3 - "$config_arg" <<'PY'
 import sys, pathlib, re
 p = pathlib.Path(sys.argv[1])
 text = p.read_text(encoding="utf-8")
