@@ -10,5 +10,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: dependências (yaml é usado pelo plugin de topologia)
+        run: python -m pip install --quiet pyyaml
       - name: testes
         run: python tests/run_all.py
