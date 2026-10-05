@@ -16,3 +16,26 @@ Thumbs.db
 
 # the render-test npm sandbox (installed on demand by check_plugin_render.py)
 scripts/node_modules/
+
+# --- v2 control plane -------------------------------------------------------
+# Python environments and tool caches (uv / venv). Never commit an interpreter.
+.venv/
+venv/
+.uv/
+
+# test / lint / type caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# JS/TS build output inside the apps workspace
+apps/*/dist/
+apps/*/node_modules/
+apps/desktop/src-tauri/target/
+
+# local runtime data (the daemon uses platformdirs, never the repo)
+*.log
+*.db-wal
+*.db-shm
