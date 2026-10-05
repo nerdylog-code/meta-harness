@@ -283,17 +283,23 @@ class ProcessSupervisor:
 
     # -- tree control ------------------------------------------------------
     def descendants(self, pid: int) -> list[int]:
+        """Live descendants of ``pid``.
+
+        A process tree can die **while it is being walked** — on Windows almost
+        always, because process termination is immediate and reaping happens
+        under our feet. psutil raises `NoSuchProcess` from inside
+        ``children(recursive=True)`` when that happens, so the walk is guarded:
+        a tree that is already gone is not an error, it is the desired end state.
+        """
         try:
             parent = psutil.Process(pid)
         except psutil.Error:
             return []
-        out: list[int] = []
-        for child in parent.children(recursive=True):
-            try:
-                out.append(child.pid)
-            except psutil.Error:  # pragma: no cover - raced exit
-                pass
-        return out
+        try:
+            children = parent.children(recursive=True)
+        except psutil.Error:
+            return []
+        return [child.pid for child in children]
 
     def group_members(self, pid: int) -> list[int]:
         """Descendants that are still inside our process group/session."""

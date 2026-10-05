@@ -114,8 +114,28 @@ class SupervisorTest(unittest.IsolatedAsyncioTestCase):
         handle = await self.spawn("--ignore-sigterm", "--sleep", "60")
         await asyncio.sleep(0.6)
         report = await self.sup.terminate(handle, grace_s=1.0)
-        self.assertTrue(report.escalated, "a child ignoring SIGTERM must be escalated to SIGKILL")
+        # The invariant on every platform: the tree is gone.
         self.assertTrue(report.orphan_check)
+        self.assertEqual(report.survivors, [])
+        if os.name == "nt":
+            # On Windows there is no catchable graceful termination for a plain
+            # child: `terminate()` is a hard terminate, so there is nothing to
+            # escalate *from*. Asserting escalation here would be asserting a
+            # POSIX behaviour on a platform that cannot express it. The
+            # `interrupt()` path (CTRL_BREAK) is the Windows equivalent and is
+            # exercised separately.
+            self.assertFalse(report.escalated, "Windows terminates in one step; escalation is POSIX-only")
+        else:
+            self.assertTrue(report.escalated, "a child ignoring SIGTERM must be escalated to SIGKILL")
+
+    async def test_a5b_interrupt_then_escalate(self) -> None:
+        """The platform-neutral form of A5: interrupt first, then escalate."""
+        handle = await self.spawn("--ignore-sigterm", "--sleep", "60")
+        await asyncio.sleep(0.6)
+        await self.sup.interrupt(handle)
+        report = await self.sup.terminate(handle, grace_s=1.0)
+        self.assertTrue(report.orphan_check, "the tree must be gone after interrupt + terminate")
+        self.assertEqual(self.sup.descendants(handle.pid), [])
 
     async def test_a6_large_output_does_not_deadlock(self) -> None:
         size = 4 * 1024 * 1024  # 4 MB, far beyond any pipe buffer

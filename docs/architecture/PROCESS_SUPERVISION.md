@@ -64,8 +64,32 @@ leaked **zero**. `KillReport.escaped` additionally lists processes that had
 already left the session, so a group signal's blind spot is reported rather than
 assumed away.
 
-## Platform differences
+### Second bug, found by the Windows CI matrix (not by Linux)
 
+The first CI run of the matrix failed the whole supervisor suite on Windows with
+eight errors and one signature: `psutil.NoSuchProcess` raised out of
+`kill_tree`. Cause: the live tree walk called
+`psutil.Process(pid).children(recursive=True)`, and on Windows a process is
+terminated and reaped **immediately**, so the walk frequently runs against a tree
+that is disappearing underneath it. Linux was forgiving enough that 13/13 passed
+locally for hours.
+
+Fix: every walk is guarded. A tree that is already gone is not an error — it is
+the desired end state — so `descendants()` returns an empty list instead of
+raising, in both `base.py` and `windows.py`.
+
+The same run also exposed a **test** that encoded a POSIX behaviour as a
+universal rule: A5 asserted `escalated == True` after `terminate()`. On Windows
+there is no catchable graceful termination for a plain child, so `terminate()` is
+a single hard step and there is nothing to escalate *from*. A5 now asserts the
+universal invariant (tree gone, zero survivors) on both platforms, asserts
+escalation only where the platform can send a catchable signal, and a new A5b
+covers the platform-neutral path (`interrupt()` then `terminate()`).
+
+This is the concrete reason the Book puts Windows in CI rather than in a
+checklist: Linux green was not evidence.
+
+## Platform differences
 | Concern | Linux/macOS | Windows |
 |---|---|---|
 | Isolation for signalling | `start_new_session=True` → own session and process group | `CREATE_NEW_PROCESS_GROUP` |

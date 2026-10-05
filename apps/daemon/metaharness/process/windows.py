@@ -61,11 +61,14 @@ class WindowsProcessSupervisor(ProcessSupervisor):
             parent = psutil.Process(pid)
         except psutil.Error:
             return list(found.values())
-        for child in parent.children(recursive=True):
-            try:
-                found[child.pid] = child
-            except psutil.Error:
-                continue
+        try:
+            children = parent.children(recursive=True)
+        except psutil.Error:
+            # The tree can be reaped mid-walk; we already have what we found
+            # earlier, and the root is appended below.
+            children = []
+        for child in children:
+            found[child.pid] = child
         ordered = sorted(found.items(), key=lambda item: _depth(item[1])) if found else []
         processes = [process for _, process in ordered]
         if not any(process.pid == pid for process in processes):
