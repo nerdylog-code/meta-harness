@@ -10,15 +10,16 @@ Concise checkpoint. Not a diary. (BOOK §111/§112.)
 ## Current phase
 
 **WP-002 complete — the v2 control plane skeleton boots on both target platforms.**
-WP-001 (freeze) and WP-002 (skeleton) are closed; the next package is WP-003.
+**WP-005 (ProcessSupervisor) implemented and green on Linux; its Windows half is written and targeted by tests but not yet executed (needs the first CI run).**
+WP-001, WP-002 and WP-005 are closed/holding; WP-003 (contracts) is the next package and it is a contract freeze — Architect sign-off required.
 
 | WP | State |
 |---|---|
 | WP-001 — Freeze V1 | **done** — tag on `3ef4a5c` byte-for-byte, branch `v2/control-plane`, bytecode untracked, dashboard tab retired |
 | WP-002 — V2 repository skeleton | **done** — daemon, event plane, layout, four cross-platform scripts, two-OS CI, web placeholder |
+| WP-005 — ProcessSupervisor | **done on POSIX** (12/12 real-process tests, zero orphans verified) · Windows implementation written, unexecuted |
 | WP-003 — Contracts foundation | **next** — needs Architect sign-off on the contract freeze |
 | WP-004 — Event store v2 | blocked by WP-003 |
-| WP-005 — ProcessSupervisor | unblocked (independent of contracts) |
 | WP-006 / WP-007 — Web / Tauri | WP-006 unblocked; WP-007 follows WP-006 |
 
 ## Working (verified in this checkout)
@@ -27,19 +28,20 @@ WP-001 (freeze) and WP-002 (skeleton) are closed; the next package is WP-003.
 - **Event plane**: canonical envelope with all 14 BOOK §13 keys; `kind` must be namespaced; `provenance.method` is required and validated against the Book's vocabulary; bounded ring replays the last 50 events to a late subscriber.
 - **Layout**: `platformdirs` data root (`~/.local/share/MetaHarness` on Linux; `%LOCALAPPDATA%\MetaHarness` on Windows), 7 subdirectories, `METAHARNESS_DATA_DIR` override; repo root *discovered*, never assumed.
 - **Scripts**: `python scripts/dev.py | test.py | doctor.py | package.py` — no Bash, no `shell=True`, works from PowerShell and POSIX.
-- **Tests**: v1 regression 21/21 · v2 unit 27/27 · v2 integration 4/4 (real uvicorn server + real websockets client, ~31 s).
+- **Tests**: v1 regression 21/21 · v2 unit 27/27 · v2 integration 16/16 (real uvicorn server + real websockets client, plus a real process-tree suite, ~66 s total).
+- **ProcessSupervisor** `apps/daemon/metaharness/process`: one interface, two OS implementations, pre-signal tree snapshot, verified kill (`orphan_check` inside the emitted event), bounded streams, wall-timeout budget. Design and the orphan bug it fixed: `docs/architecture/PROCESS_SUPERVISION.md`.
 - **Web placeholder** `apps/web`: Vite + React + TS + TanStack Query; `pnpm typecheck` clean, `pnpm build` produces `dist/` and the daemon serves it (verified: `/health` reports the bundle, `GET /` returns index.html, the JS asset answers 200).
 - **CI** `.github/workflows/ci.yml`: matrix `ubuntu-latest` + `windows-latest`, three suites, plus a web job gated on `apps/web/package.json`.
 
 ## Not yet built (explicitly)
 
-No runtime adapter, no `ProcessSupervisor`, no SQLite store, no missions/tasks/approvals, no context engine, no plugin kernel, no secrets broker, no channels, no voice, no RAG, no Tauri shell, no auth token enforcement (the enforced property today is **loopback-only**).
+No runtime adapter, no SQLite store, no missions/tasks/approvals, no context engine, no plugin kernel, no secrets broker, no channels, no voice, no RAG, no Tauri shell, no auth token enforcement (the enforced property today is **loopback-only**).
 
 ## Next
 
-1. **WP-003 — contracts** (Architect sign-off required; ADR-0006 + the event-envelope ADR). Prerequisites already resolved: ADR-0003 (SQLite canonical), ADR-0014 (structured protocols), ADR-0016 (Hermes transport).
-2. **WP-005 — ProcessSupervisor** can run in parallel with WP-003.
-3. **WP-004 — event store** starts only after WP-003 freezes.
+1. **WP-003 — contracts** (Architect sign-off required; ADR-0006 + the event-envelope ADR). Prerequisites already resolved: ADR-0003 (SQLite canonical), ADR-0014 (structured protocols), ADR-0016 (Hermes transport). This is the only remaining blocker before adapters.
+2. **WP-004 — event store** starts only after WP-003 freezes.
+3. **WP-005 on Windows** closes with the first CI run (needs push authorisation) — the POSIX half is green and the gate is the same suite on both OSes.
 4. Then the first adapter (Pi) → the M1 walking skeleton (BOOK §75/§116).
 
 ## Important decisions

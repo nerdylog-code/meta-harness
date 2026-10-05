@@ -1,6 +1,6 @@
 # First wave — dependency DAG and work packages
 
-**Status (2026-10-05):** WP-001 **done** (tag `v0.1-hermes-hosted` on `3ef4a5c`, byte-for-byte) · WP-002 **done** (daemon + event plane + layout + cross-platform scripts + two-OS CI + web placeholder; v1 21/21, v2 unit 27/27, v2 integration 4/4). Next: WP-003 (Architect sign-off) with WP-005 unblocked beside it.
+**Status (2026-10-05):** WP-001 **done** (tag `v0.1-hermes-hosted` on `3ef4a5c`, byte-for-byte) · WP-002 **done** (daemon + event plane + layout + cross-platform scripts + two-OS CI + web placeholder; v1 21/21, v2 unit 27/27, v2 integration 16/16) · WP-005 **done on POSIX**, Windows written but unexecuted (needs the first CI run). Next: WP-003, which is a contract freeze and therefore requires Architect sign-off; WP-004 waits on it.
 
 **Source:** PROJECT_BOOK §72 (*First engineering wave*), §75 (parallelism rule: 3–5 builders per wave), §67 (work-package format).
 **Baseline:** `nerdylog-code/meta-harness @ 3ef4a5c`, no tags, `master` only.

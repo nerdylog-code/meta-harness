@@ -9,8 +9,7 @@ not a roadmap; the roadmap is `WP_DAG.md` and `docs/work-packages/`.
 ## 1. Shape
 
 ```
-                      scripts/dev.py  (canonical entry point)
-                             │
+                      scripts/dev.py  (canonical entry point)                             │
                              ▼
    ┌──────────────────────────────────────────────────────────┐
    │ apps/daemon/metaharness                                  │
@@ -19,12 +18,13 @@ not a roadmap; the roadmap is `WP_DAG.md` and `docs/work-packages/`.
    │  events.py   canonical envelope + broadcast bus          │
    │  paths.py    platformdirs data root + repo discovery      │
    │  version.py  identity (version, git sha, runtime)        │
+   │  process/    ProcessSupervisor (one interface, two OSes) │
    └──────────────────────────────────────────────────────────┘
                              │
         ┌────────────────────┼─────────────────────┐
         ▼                    ▼                     ▼
-   SQLite store         ProcessSupervisor      Runtime adapters
-   (WP-004)             (WP-005)               (after WP-003/004/005)
+   SQLite store         Runtime adapters      Web / desktop UI
+   (WP-004)             (after WP-003)        (WP-006, WP-007)
 ```
 
 The daemon is the **system of record** (BOOK §5.5). Anything the UI shows is a
@@ -97,7 +97,6 @@ Stated plainly so nothing here is mistaken for done (BOOK §82 — no fake green
 | Durable storage, migrations, projections, replay | WP-004 |
 | Missions, tasks, task graph, approvals, work graph | WP-006 and the mission phases |
 | `RuntimeAdapter` and any runtime at all | WP-003 (contract), then the Pi adapter |
-| `ProcessSupervisor` (spawn/stream/kill tree) | WP-005 |
 | Context engine, capsules, compaction, budgets | CONTEXT phases |
 | Secrets broker, plugins, channels, voice, RAG | their phases |
 | Web UI, desktop shell | WP-006, WP-007 |
@@ -110,10 +109,13 @@ Three suites, all runnable with one command (`python scripts/test.py`):
 - **`v1`** — the frozen MVP's 21 unit tests, kept as a regression asset. They
   must stay green: they are the only surviving executable description of v1's
   behaviour.
-- **`unit`** — layout/provenance/envelope/HTTP/guard, no mocks of our own code.
-- **`integration`** — a **real** uvicorn server on a free port in a thread, a
-  real `websockets` client, real frames over the wire. The WP-002 gate is
-  impossible to satisfy honestly without this.
+- **`unit`** — 27 tests: layout, provenance discipline, envelope shape vs the
+  Book, HTTP surface, loopback guard. Nothing of ours is mocked.
+- **`integration`** — 16 tests: a **real** uvicorn server on a free port in a
+  thread with a real `websockets` client, plus the `ProcessSupervisor` suite,
+  which spawns real process trees and independently verifies what survived
+  (see `docs/architecture/PROCESS_SUPERVISION.md`). The WP-002 and WP-005 gates
+  are impossible to satisfy honestly without this.
 
 Suites live under `tests/{unit,integration}` **without `__init__.py`**, so v1's
 own discovery (`tests/run_all.py`) keeps finding exactly what it found before.
