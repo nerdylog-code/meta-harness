@@ -4,14 +4,21 @@ Concise checkpoint. Not a diary. (BOOK §111/§112.)
 
 **Branch:** `v2/control-plane` · **Historical tag:** `v0.1-hermes-hosted` → `3ef4a5c` (immutable)
 **Authority order:** `PROJECT_BOOK.md` → accepted ADRs → this file → the current work package → code → tests.
+`PROJECT_BOOK.md` now lives in the repository root (sha256 `d248ebbab24fcac2…`, 3145 lines), so
+the first item of the authority order is readable from a clone instead of only from the owner's
+machine. It is the owner's document, unedited.
 
 ---
 
 ## Current phase
 
-**WP-002 complete — the v2 control plane skeleton boots on both target platforms.**
-**The CI matrix is green on `ubuntu-latest` and `windows-latest`** (run `37377861032`, all four suites on both OSes), which closes the WP-002 and WP-005 gates with measured evidence instead of a written contract. The remote branch is `v2/control-plane`; `master` and the tag `v0.1-hermes-hosted` are untouched.
-WP-001, WP-002, WP-003 and WP-005 are closed with their gates met. Next: WP-004 (event store) and WP-006 (web shell), which are independent and can run in parallel.
+**WP-004 complete — SQLite is the canonical store.** A single append-only event log with
+migrations, transactional projections, artifact externalization, replay equivalence, a
+derived JSONL export and boot reconciliation. A1–A9 pass locally (store 54 tests, replay 21
+tests, ~7 s combined); A10 is the two-OS CI matrix.
+**The CI matrix is green on `ubuntu-latest` and `windows-latest`** (run `37377861032`), which
+closed the WP-002 and WP-005 gates with measured evidence instead of a written contract.
+`master` and the tag `v0.1-hermes-hosted` are untouched.
 
 | WP | State |
 |---|---|
@@ -19,8 +26,8 @@ WP-001, WP-002, WP-003 and WP-005 are closed with their gates met. Next: WP-004 
 | WP-002 — V2 repository skeleton | **done, gate closed** — daemon, event plane, layout, four cross-platform scripts, **two-OS CI green (ubuntu + windows)**, web placeholder |
 | WP-005 — ProcessSupervisor | **done, gate closed** — the same suite passes on **Windows and Linux**; zero orphans verified on both (BOOK §79 gate) |
 | WP-003 — Contracts foundation | **done and signed off** — 24 wire contracts, per-metric provenance, payload-bound approvals, `RuntimeAdapter` v2, `FakeRuntimeAdapter` + conformance suite, generated JSON Schema + TypeScript mirror in parity (113 tests, runs on both OSes) |
-| WP-004 — Event store v2 | **next** — unblocked by the frozen contracts (ADR-0003, ADR-0017) |
-| WP-006 / WP-007 — Web / Tauri | WP-006 unblocked (parallel with WP-004); WP-007 follows WP-006 |
+| WP-004 — Event store v2 | **done** — SQLite canonical (ADR-0003 implemented): 3 migrations, append-only log enforced by triggers, transactional projections, idempotent appends, content-addressed artifacts, replay equivalence on 10 007 events, JSONL export, boot reconciliation in its own package |
+| WP-006 / WP-007 — Web / Tauri | **next** — WP-006 unblocked; WP-007 follows WP-006 |
 
 ## Working (verified in this checkout)
 
@@ -28,21 +35,31 @@ WP-001, WP-002, WP-003 and WP-005 are closed with their gates met. Next: WP-004 
 - **Event plane**: canonical envelope with all 14 BOOK §13 keys; `kind` must be namespaced; `provenance.method` is required and validated against the Book's vocabulary; bounded ring replays the last 50 events to a late subscriber.
 - **Layout**: `platformdirs` data root (`~/.local/share/MetaHarness` on Linux; `%LOCALAPPDATA%\MetaHarness` on Windows), 7 subdirectories, `METAHARNESS_DATA_DIR` override; repo root *discovered*, never assumed.
 - **Scripts**: `python scripts/dev.py | test.py | doctor.py | package.py` — no Bash, no `shell=True`, works from PowerShell and POSIX.
-- **Tests**: v1 regression 21/21 · v2 unit 27/27 · v2 integration 16/16 (real uvicorn server + real websockets client, plus a real process-tree suite, ~66 s total).
+- **Canonical store** `apps/daemon/metaharness/store` (WP-004): SQLite WAL, three numbered migrations, `BEGIN IMMEDIATE` per append, `seq` assigned inside the transaction and gap-free, append-only enforced by triggers, idempotent by event id, content-addressed artifacts with no blob column, JSONL export that is derived only. One call proves replay: `uv run python -c "import asyncio, metaharness.store as s; print(asyncio.run(s.replay_equivalence_check()))"`.
+- **Boot reconciliation** `apps/daemon/metaharness/reconcile`: reads persisted state, asks a `ProcessProbe`, appends `run.interrupted` with `orphaned=true`, and never resumes work. Deliberately outside the store.
+- **Tests**: v1 regression 21/21 · v2 unit 27/27 · contracts 113/113 · **store 54/54** · integration 16/16 · **replay 21/21** (real server, real websockets, real process trees, real hard kills; the whole default run is ~80 s).
 - **ProcessSupervisor** `apps/daemon/metaharness/process`: one interface, two OS implementations, pre-signal tree snapshot, verified kill (`orphan_check` inside the emitted event), bounded streams, wall-timeout budget. Design and the orphan bug it fixed: `docs/architecture/PROCESS_SUPERVISION.md`.
 - **Web placeholder** `apps/web`: Vite + React + TS + TanStack Query; `pnpm typecheck` clean, `pnpm build` produces `dist/` and the daemon serves it (verified: `/health` reports the bundle, `GET /` returns index.html, the JS asset answers 200).
-- **CI** `.github/workflows/ci.yml`: matrix `ubuntu-latest` + `windows-latest`, three suites, plus a web job gated on `apps/web/package.json`.
+- **CI** `.github/workflows/ci.yml`: matrix `ubuntu-latest` + `windows-latest`, six suites (v1, unit, contracts, store, integration, replay), plus a web job gated on `apps/web/package.json`.
 
 ## Not yet built (explicitly)
 
-No runtime adapter, no SQLite store, no missions/tasks/approvals, no context engine, no plugin kernel, no secrets broker, no channels, no voice, no RAG, no Tauri shell, no auth token enforcement (the enforced property today is **loopback-only**).
+No runtime adapter, no missions/tasks/approvals tables, no context engine, no plugin
+kernel, no secrets broker, no channels, no voice, no RAG, no Tauri shell, no auth token
+enforcement (the enforced property today is **loopback-only**), and the daemon does not yet
+read or write through the store (WP-004 delivered the storage kernel; the wiring is the
+next slice).
 
 ## Next
 
-1. **WP-003 — contracts** (Architect sign-off required; ADR-0006 + the event-envelope ADR). Prerequisites already resolved: ADR-0003 (SQLite canonical), ADR-0014 (structured protocols), ADR-0016 (Hermes transport). This is the only remaining blocker before adapters.
-2. **WP-004 — event store** starts only after WP-003 freezes.
-3. **WP-005 on Windows** closes with the first CI run (needs push authorisation) — the POSIX half is green and the gate is the same suite on both OSes.
-4. Then the first adapter (Pi) → the M1 walking skeleton (BOOK §75/§116).
+1. **WP-006 — web shell** (unblocked; the New Control UI skeleton, no heavy polish yet).
+2. **Daemon ↔ store wiring** — the slice WP-004 deliberately left out: the API must read
+   and write through `metaharness.store`, and the daemon's hand-rolled `CanonicalEvent`
+   (`apps/daemon/metaharness/events.py`, WP-002) must be deleted rather than maintained
+   alongside the frozen contract. Recorded as a defect in `STORAGE.md` §10.
+3. **WP-007 — Tauri shell** (after WP-006).
+4. Then the first adapter (Pi) → the M1 walking skeleton (BOOK §75/§116). WP-003, WP-004 and
+   WP-005 are all green, which is the Book's precondition for starting it (§72).
 
 ## Important decisions
 
@@ -70,6 +87,19 @@ git log --oneline --decorate -6
 - Durability is absent by design: the event ring is in memory, so a restart loses events. WP-004 makes SQLite canonical (ADR-0003).
 - `doctor.py` exits 2 when only warnings remain (missing pnpm/node/web bundle), which is information, not failure; CI calls it with `--report-only` because a runner is expected to be partial.
 - CI prints two deprecation notices from third-party actions (Node 20 → 24) and one runner-label migration notice. Neither affects our code; the action versions are pinned and will be bumped deliberately.
+
+- **`synchronous=NORMAL`.** A power cut can lose the tail of the log. What it cannot do is
+  corrupt the database or leave a partial event, and the crash test asserts exactly that
+  bound rather than "nothing was lost" (`docs/architecture/STORAGE.md` §4).
+- **The daemon still speaks through its own in-memory envelope.** `apps/daemon/metaharness/events.py`
+  (WP-002) carries a hand-rolled `CanonicalEvent` that duplicates the frozen contract, and
+  the API does not yet read or write the store. That duplication is a defect to delete in
+  the wiring slice, not a design.
+- **The event log has no retention policy**, so it grows forever until compaction or
+  archival is specified. The JSONL export is the backup story until then.
+- **Boot reconciliation reports `leases_released: 0`** with an explanatory note, because the
+  lease surface does not exist yet (it arrives with the worktree feature, BOOK §26/§28).
+  Reporting a number we do not have would be fake green.
 
 ---
 

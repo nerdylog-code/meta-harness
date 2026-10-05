@@ -21,10 +21,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 TESTS = REPO_ROOT / "tests"
 
 SUITES: dict[str, list[str]] = {
-    "v1": ["run_all.py", "tests/run_all.py"],  # v1's own runner (regression asset)
+    "v1": ["tests/run_all.py", "-"],  # v1's own runner (regression asset)
     "unit": ["tests/unit", "-"],
-    "integration": ["tests/integration", "-"],
     "contracts": ["tests/contracts", "-"],
+    "store": ["tests/unit/store", "-"],  # WP-004 acceptance tests A1/A2/A5/A6/A8
+    "replay": ["tests/integration/replay", "-"],  # WP-004 A3/A4/A7/A9
+    "integration": ["tests/integration", "-"],
 }
 
 #: Modules each suite needs in the interpreter that runs it. Checked up front so
@@ -35,6 +37,8 @@ SUITE_REQUIREMENTS: dict[str, tuple[str, ...]] = {
     "v1": ("yaml",),
     "unit": ("fastapi", "platformdirs"),
     "contracts": ("pydantic",),
+    "store": ("pydantic", "platformdirs"),
+    "replay": ("pydantic", "psutil"),
     "integration": ("fastapi", "websockets", "psutil"),
 }
 
@@ -90,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
             print(name)
         return 0
 
-    selected = args.suite or ["v1", "unit", "contracts", "integration"]
+    selected = args.suite or ["v1", "unit", "contracts", "store", "integration", "replay"]
     results: dict[str, int] = {}
     for name in selected:
         missing = missing_requirements(name)
@@ -107,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
         if name == "v1":
             results[name] = run_v1()
         else:
-            results[name] = run_discovery(TESTS / name)
+            results[name] = run_discovery(REPO_ROOT / SUITES[name][0])
 
     print()
     for name in selected:

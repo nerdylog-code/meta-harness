@@ -2,6 +2,38 @@
 
 **Owner:** Flash-class builder · **Wave:** W4 · **Depends on:** WP-003 (frozen contracts) · **Runs in parallel with:** WP-005
 
+**Status: done (2026-10-05).** A1–A9 pass locally; A10 (both OSes) is the CI matrix.
+Scope notes recorded rather than assumed:
+
+- the boot reconciler lives in a **new package** `apps/daemon/metaharness/reconcile/`,
+  outside the file list above, because the Architect's instruction for this package is that
+  the store must not know what a process is. `projections/`, `export/`, `migrations/`, the
+  two new test suites and the two docs are as listed;
+- `scripts/test.py` gained the `store` and `replay` suites and `scripts/doctor.py` prints
+  the resolved store path and schema version, both required by this package's own
+  acceptance commands;
+- three migration files (0001 events, 0002 artifacts, 0003 runs) rather than one, so each
+  concern keeps its own hash and future collisions stay local.
+
+## Results
+
+| # | Test | Result |
+|---|---|---|
+| A1 | Append + ordered range reads | pass — `tests/unit/store/test_append_and_seq.py` |
+| A2 | Transactional projection rollback | pass — `tests/unit/store/test_transactional_projection.py` |
+| A3 | Replay equivalence, 10 007 generated events | pass — identical digest |
+| A4 | Restart persistence, no manual step | pass |
+| A5 | Migration order/immutability/atomicity/tamper | pass |
+| A6 | Artifact externalization, no blob | pass — 5 MiB payload, database stays 4 KiB |
+| A7 | Crash safety under a hard kill mid-append | pass — integrity, gapless seq, replay-equal projections |
+| A8 | JSONL export derived and lossless | pass |
+| A9 | Reconciliation marks the stale run and records why | pass |
+| A10 | A1–A9 on Linux **and** Windows | in CI |
+
+Follow-ups (explicitly out of scope here, all recorded in `STORAGE.md` §10): wiring the
+daemon API to the store and deleting its duplicate envelope class; the heartbeat projection
+when the heartbeat feature lands; retention/archival of an unbounded log.
+
 ---
 
 ## Objective

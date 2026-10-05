@@ -43,6 +43,12 @@ jobs:
       - name: shared contracts + Python/TypeScript parity
         run: uv run python scripts/test.py --suite contracts
 
+      - name: canonical store suite (WP-004 A1/A2/A5/A6/A8)
+        run: uv run python scripts/test.py --suite store
+
+      - name: replay, crash and reconciliation suite (WP-004 A3/A4/A7/A9)
+        run: uv run python scripts/test.py --suite replay
+
       - name: typecheck the generated TypeScript contracts
         run: npx --yes -p typescript@5.6.3 tsc -p packages/contracts/ts/tsconfig.json
 

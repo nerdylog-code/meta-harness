@@ -27,3 +27,12 @@ include = ["apps/daemon/metaharness", "packages/contracts", "README-v2.md", "LIC
 
 [tool.uv]
 package = true
+
+# Point the language server at the project virtualenv. Without this, Pyright reports
+# "metaharness_contracts could not be resolved" for modules that run perfectly under
+# `uv run` -- a false alarm that trains people to ignore the editor.
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+include = ["apps/daemon", "packages/contracts", "tests", "scripts"]
+exclude = ["**/__pycache__", "apps/web/node_modules"]

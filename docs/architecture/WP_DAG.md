@@ -1,6 +1,6 @@
 # First wave — dependency DAG and work packages
 
-**Status (2026-10-05):** WP-001 **done** (tag `v0.1-hermes-hosted` on `3ef4a5c`, byte-for-byte) · WP-002 **done** (daemon + event plane + layout + cross-platform scripts + two-OS CI + web placeholder) · WP-005 **done on POSIX**, Windows written but unexecuted (needs the first CI run) · WP-003 **done and signed off** (contracts frozen: ADR-0006 + ADR-0017; 177 tests green across v1 21 / unit 27 / contracts 113 / integration 16). Next: WP-004 (event store), which the frozen contracts unblock; WP-006 also available.
+**Status (2026-10-05):** WP-001 **done** · WP-002 **done, gate closed** (two-OS CI green) · WP-003 **done and signed off** (contracts frozen: ADR-0006 + ADR-0017) · WP-004 **done** (canonical store: migrations, append-only log, transactional projections, artifact externalization, replay equivalence, JSONL export, boot reconciliation; A1–A9 green locally, A10 in CI) · WP-005 **done, gate closed** (the supervisor suite passes on Windows and Linux, zero orphans on both). Next: **WP-006 (web shell)** and the daemon↔store wiring slice that WP-004 deliberately left out.
 
 **Source:** PROJECT_BOOK §72 (*First engineering wave*), §75 (parallelism rule: 3–5 builders per wave), §67 (work-package format).
 **Baseline:** `nerdylog-code/meta-harness @ 3ef4a5c`, no tags, `master` only.

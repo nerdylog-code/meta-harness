@@ -78,10 +78,29 @@ The supervisor's `kill_tree` payload carries `orphan_check` on purpose: the BOOK
 §79 gate is proof of zero orphans, so the proof travels with the event rather
 than living only in the test suite.
 
+## Storage & replay (WP-004)
+
+Durability arrived with WP-004: SQLite is now canonical and JSONL is a derived export
+(ADR-0003). The store lives in `apps/daemon/metaharness/store/`, and the full contract —
+transaction discipline, `seq` ownership, artifact externalization, migration rules, replay
+equivalence and the reconciliation boundary — is in
+[`STORAGE.md`](STORAGE.md).
+
+Two things about the event plane that this changes:
+
+- the store assigns `seq` (monotonic, gapless, inside the append transaction). The
+  in-memory plane's own counter is no longer the reference the daemon will report;
+- `system.store.opened`, `system.store.migrated`, `system.replay.completed` and
+  `system.reconcile.completed` join the emitted kinds below.
+
+The in-memory ring in this daemon build remains the live transport until the API is wired
+to the store; that wiring is the next slice, and the duplicate envelope class it leaves
+behind is recorded as a defect to delete, not to maintain.
+
 ## Consumers
 
 - `GET /v1/events` returns the daemon's bounded ring — the polling fallback.
 - `WS /v1/events/ws` streams the same envelope, replaying the last 50 events to a
   fresh subscriber so it can never look like a hang.
-- Durability arrives with WP-004, where SQLite becomes canonical and JSONL becomes
-  a derived export (ADR-0003).
+- `metaharness.store.Store` (canonical, WP-004): append, ordered range reads, projection
+  snapshots, replay, export and boot reconciliation. See [`STORAGE.md`](STORAGE.md).

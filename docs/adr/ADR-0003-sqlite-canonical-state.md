@@ -1,6 +1,6 @@
 # ADR-0003 — SQLite is the canonical source of state and events
 
-**Status:** accepted (2026-10-05) · **Decision owner:** project owner + Architect (Book §Appendix A #3)
+**Status:** accepted (2026-10-05) · **implemented** (WP-004, 2026-10-05) · **Decision owner:** project owner + Architect (Book §Appendix A #3)
 **Supersedes:** v1 `docs/DECISIONS.md` ADR-0003 (*"SQLite + JSONL hybrid"*, 2026-08-24)
 **Format:** PROJECT_BOOK §91.
 
@@ -64,3 +64,20 @@ Large payloads stay out of the database: they live on the filesystem, and SQLite
 3. **WP-004 A4** — restart preserves state with no manual step.
 4. **WP-004 A8** — deleting the JSONL export changes nothing; re-importing it reproduces the same state.
 5. **Review check** — `grep` for any read of a `.jsonl` path outside the export/importer module is a defect.
+
+## IMPLEMENTATION — validation results (WP-004, 2026-10-05)
+
+All five checks above are now executable rather than aspirational:
+
+| Check | Evidence |
+|---|---|
+| Single transaction | `tests/unit/store/test_transactional_projection.py` — a refusing projection rolls back the event, the `seq` and every projection; the store stays usable afterwards |
+| Replay equality | `tests/integration/replay/test_replay_equivalence.py` — 10 007 generated events, identical projection digest (appended ~2.4 s, replayed ~2.2 s) |
+| Restart | `tests/integration/replay/test_restart_and_crash.py` — reopen applies no migration and preserves state; crash safety asserted under a hard kill mid-append |
+| JSONL derived | `tests/unit/store/test_export_jsonl.py` — round-trip reproduced; deleting the export changes nothing |
+| No second authority | the check is a test (`JsonlIsNotAnAuthorityTest`), using the AST rather than a grep, with a second test proving the detector catches a real offender |
+
+Two properties from the ADR are enforced by the schema rather than by convention: the log
+is append-only via triggers (so no future refactor can add an `UPDATE` path) and the
+artifact table declares no blob column (asserted by inspecting declared column types).
+Details, including what the WAL assumption does *not* guarantee: `docs/architecture/STORAGE.md`.

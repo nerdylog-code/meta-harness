@@ -98,6 +98,42 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[{'OK' if bundle else 'WARN'}] web bundle: {bundle or 'not built (API-only mode)'}")
     CHECKS.append(("OK" if bundle else "WARN", "web bundle"))
 
+    # --- canonical store (WP-004) --------------------------------------------
+    # Prints the resolved data root and the schema version, which is what the WP-004
+    # acceptance command asks for. Opening a store that does not exist yet would create
+    # it, so a diagnostic must not: an absent store is reported as "not created yet".
+    try:
+        if str(DAEMON_DIR) not in sys.path:
+            sys.path.insert(0, str(DAEMON_DIR))
+        from metaharness.store import Store, default_db_path
+        from metaharness.store.migrations import MIGRATIONS_DIR, discover
+
+        db_path = default_db_path()
+        expected = len(discover(MIGRATIONS_DIR))
+        if db_path.is_file():
+            store = Store(db_path, emit_open_event=False)
+            try:
+                report = store.verify()
+                version_ok = store.schema_version == expected
+                level = "OK" if (report.ok and version_ok) else "FAIL"
+                print(
+                    f"[{level}] store: schema v{store.schema_version}/{expected}, "
+                    f"{report.events} events, journal {report.journal_mode}"
+                )
+                print(f"       store path: {db_path}")
+                for problem in report.problems[:5]:
+                    print(f"       problem: {problem}")
+                CHECKS.append((level, "canonical store"))
+            finally:
+                store.close()
+        else:
+            print(f"[OK] store: not created yet; {expected} migration(s) ready")
+            print(f"       store path (created on first run): {db_path}")
+            CHECKS.append(("OK", "canonical store"))
+    except Exception as exc:
+        print(f"[WARN] canonical store check unavailable: {exc}")
+        CHECKS.append(("WARN", "canonical store"))
+
     # --- v1 regression asset -------------------------------------------------
     v1_tests = (REPO_ROOT / "tests" / "run_all.py").is_file()
     print(f"[{'OK' if v1_tests else 'FAIL'}] v1 regression suite present (tests/run_all.py)")
