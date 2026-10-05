@@ -95,6 +95,10 @@ the work actually is.
   the other way round.
 - **Failures are visible.** Unsupported capabilities and degraded modes are
   reported, never silently substituted.
+- **Validate workflows locally before pushing.** A malformed workflow fails at
+  0 s with "workflow file issue" and no job output — the least diagnosable
+  failure GitHub produces. `actionlint .github/workflows/` catches it in a
+  second (context availability, expression syntax, action inputs).
 
 ## License
 

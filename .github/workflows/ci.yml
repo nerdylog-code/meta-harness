@@ -53,7 +53,11 @@ jobs:
   web:
     name: web
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('apps/web/package.json') != '' }}
+    # No job-level guard here on purpose: `hashFiles` is not available in
+    # `jobs.<job_id>.if` (it needs the workspace, which does not exist yet at
+    # that point), and a workflow file using it fails validation before any job
+    # runs. `apps/web/package.json` is part of the repo since WP-002, so a
+    # missing web app is a real regression and should fail loudly.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
