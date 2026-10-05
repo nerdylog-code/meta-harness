@@ -111,9 +111,14 @@ class EventBus:
         with self._lock:
             self._seq += 1
             seq = self._seq
+        # The frozen contract requires each payload to declare its own version
+        # (WP-003 decision 2 / docs/architecture/EVENTS.md); the skeleton stamps
+        # v=1 so nothing can emit an unversioned payload by omission.
+        body = dict(payload or {})
+        body.setdefault("v", 1)
         event = CanonicalEvent(
             kind=kind,
-            payload=dict(payload or {}),
+            payload=body,
             provenance={"method": method, "origin": origin},
             id=new_id(),
             seq=seq,

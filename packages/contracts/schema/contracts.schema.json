@@ -1,0 +1,1997 @@
+{
+  "$defs": {
+    "AcceptanceGate": {
+      "additionalProperties": false,
+      "description": "How a task proves it is done. A model's sentence is not a gate.",
+      "properties": {
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        },
+        "criteria": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Criteria",
+          "type": "array"
+        },
+        "requires_artifact": {
+          "default": false,
+          "title": "Requires Artifact",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "ActionProposal": {
+      "additionalProperties": false,
+      "description": "A proposal. It authorises nothing; it is the input to an approval.",
+      "properties": {
+        "action": {
+          "title": "Action",
+          "type": "string"
+        },
+        "action_payload": {
+          "additionalProperties": true,
+          "title": "Action Payload",
+          "type": "object"
+        },
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "impact": {
+          "title": "Impact",
+          "type": "string"
+        },
+        "required_approval": {
+          "title": "Required Approval",
+          "type": "boolean"
+        },
+        "reversible": {
+          "title": "Reversible",
+          "type": "boolean"
+        },
+        "risk": {
+          "$ref": "#/$defs/RiskLevel"
+        }
+      },
+      "required": [
+        "action",
+        "impact",
+        "risk",
+        "reversible",
+        "required_approval"
+      ],
+      "type": "object"
+    },
+    "ActiveFile": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "state": {
+          "default": "unknown",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "title": "ActiveFile",
+      "type": "object"
+    },
+    "AgentSpec": {
+      "additionalProperties": false,
+      "description": "The identity of an agent, independent of any runtime.",
+      "properties": {
+        "character": {
+          "$ref": "#/$defs/CharacterBinding"
+        },
+        "context_policy": {
+          "default": "capsule-v1",
+          "title": "Context Policy",
+          "type": "string"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "heartbeat_policy": {
+          "default": "standard",
+          "title": "Heartbeat Policy",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "memory_policy": {
+          "default": "project",
+          "title": "Memory Policy",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "model_policy": {
+          "$ref": "#/$defs/ModelPolicy"
+        },
+        "permissions": {
+          "items": {
+            "$ref": "#/$defs/Permission"
+          },
+          "title": "Permissions",
+          "type": "array"
+        },
+        "purpose": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Purpose"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "runtime_policy": {
+          "$ref": "#/$defs/RuntimePolicy"
+        },
+        "skills": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skills",
+          "type": "array"
+        },
+        "voice": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Voice"
+        },
+        "workspace_policy": {
+          "$ref": "#/$defs/WorkspacePolicy"
+        }
+      },
+      "required": [
+        "id",
+        "display_name",
+        "role",
+        "runtime_policy",
+        "model_policy"
+      ],
+      "type": "object"
+    },
+    "AgentVersion": {
+      "additionalProperties": false,
+      "description": "A frozen configuration of an agent. Immutable by construction.",
+      "properties": {
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "number"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "spec": {
+          "$ref": "#/$defs/AgentSpec"
+        },
+        "trust": {
+          "$ref": "#/$defs/TrustLevel",
+          "default": "user"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "agent_id",
+        "version",
+        "spec",
+        "created_at"
+      ],
+      "type": "object"
+    },
+    "ApprovalRequest": {
+      "additionalProperties": false,
+      "description": "An authorisation bound to one payload hash.",
+      "properties": {
+        "action_payload": {
+          "additionalProperties": true,
+          "title": "Action Payload",
+          "type": "object"
+        },
+        "action_payload_hash": {
+          "title": "Action Payload Hash",
+          "type": "string"
+        },
+        "action_type": {
+          "title": "Action Type",
+          "type": "string"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "granted": {
+          "default": false,
+          "title": "Granted",
+          "type": "boolean"
+        },
+        "granted_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Granted At"
+        },
+        "granted_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Granted By"
+        },
+        "human_summary": {
+          "title": "Human Summary",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "requested_by": {
+          "title": "Requested By",
+          "type": "string"
+        },
+        "reversibility": {
+          "title": "Reversibility",
+          "type": "string"
+        },
+        "risk_level": {
+          "$ref": "#/$defs/RiskLevel"
+        }
+      },
+      "required": [
+        "id",
+        "risk_level",
+        "action_type",
+        "action_payload_hash",
+        "human_summary",
+        "reversibility",
+        "requested_by"
+      ],
+      "type": "object"
+    },
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "description": "A durable payload. The bytes live on the filesystem, never in the DB.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "mime": {
+          "title": "Mime",
+          "type": "string"
+        },
+        "origin": {
+          "additionalProperties": true,
+          "title": "Origin",
+          "type": "object"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "sha256",
+        "mime",
+        "size"
+      ],
+      "type": "object"
+    },
+    "ArtifactRefLite": {
+      "additionalProperties": false,
+      "description": "A pointer to an artifact, by exact id. Never the artifact's content.",
+      "properties": {
+        "artifact_id": {
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "purpose": {
+          "title": "Purpose",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "purpose"
+      ],
+      "title": "ArtifactRefLite",
+      "type": "object"
+    },
+    "Blocker": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "kind": {
+          "default": "unknown",
+          "title": "Kind",
+          "type": "string"
+        },
+        "needs": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Needs"
+        }
+      },
+      "required": [
+        "description"
+      ],
+      "title": "Blocker",
+      "type": "object"
+    },
+    "Budget": {
+      "additionalProperties": false,
+      "description": "A budget is a limit, not a hope (BOOK §12).",
+      "properties": {
+        "attempts": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attempts"
+        },
+        "money": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Money"
+        },
+        "tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokens"
+        },
+        "wall_time_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wall Time S"
+        }
+      },
+      "type": "object"
+    },
+    "CanonicalEvent": {
+      "additionalProperties": true,
+      "description": "One thing that happened, canonical and vendor-neutral.\n\nNothing here branches on a vendor: an executing runtime is an id string, and\nthe same envelope carries any of them. Keeping the schema free of vendor\nnames is a tested property, not a style preference\n(tests/contracts/test_contract_hygiene.py).",
+      "properties": {
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Correlation Id"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "mission_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mission Id"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        },
+        "provenance": {
+          "additionalProperties": true,
+          "title": "Provenance",
+          "type": "object"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "runtime_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime Id"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "seq",
+        "ts",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "CapabilityInfo": {
+      "additionalProperties": false,
+      "description": "One capability, with the metadata its provider chooses to attach.",
+      "properties": {
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "supported": {
+          "title": "Supported",
+          "type": "boolean"
+        },
+        "version": {
+          "default": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "supported"
+      ],
+      "type": "object"
+    },
+    "CapabilitySet": {
+      "additionalProperties": false,
+      "description": "A runtime's declared capabilities.\n\nThis is a mapping of capability id -> :class:`CapabilityInfo`, not a wall of\nbooleans spread across the adapter contract. It says nothing about *which*\nruntime it came from, and it is the only thing the UI may consult before\noffering a feature.",
+      "properties": {
+        "capabilities": {
+          "additionalProperties": {
+            "$ref": "#/$defs/CapabilityInfo"
+          },
+          "title": "Capabilities",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "CapsulePhase": {
+      "description": "BOOK §21 pressure phases.",
+      "enum": [
+        "NORMAL",
+        "NOTICE",
+        "PREPARE",
+        "FORCED",
+        "COMPACTING",
+        "RESUMED"
+      ],
+      "title": "CapsulePhase",
+      "type": "string"
+    },
+    "CharacterBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "default": "builder",
+          "title": "Id",
+          "type": "string"
+        },
+        "pack": {
+          "default": "default",
+          "title": "Pack",
+          "type": "string"
+        }
+      },
+      "title": "CharacterBinding",
+      "type": "object"
+    },
+    "CompletedItem": {
+      "additionalProperties": false,
+      "properties": {
+        "proof": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Proof",
+          "type": "array"
+        },
+        "result": {
+          "title": "Result",
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "CompletedItem",
+      "type": "object"
+    },
+    "ContextCapsule": {
+      "additionalProperties": false,
+      "description": "The 16 required fields of WP-003 decision 6 — no more, no fewer.",
+      "properties": {
+        "active_files": {
+          "items": {
+            "$ref": "#/$defs/ActiveFile"
+          },
+          "title": "Active Files",
+          "type": "array"
+        },
+        "artifacts": {
+          "items": {
+            "$ref": "#/$defs/ArtifactRefLite"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/Blocker"
+          },
+          "title": "Blockers",
+          "type": "array"
+        },
+        "completed": {
+          "items": {
+            "$ref": "#/$defs/CompletedItem"
+          },
+          "title": "Completed",
+          "type": "array"
+        },
+        "current_phase": {
+          "$ref": "#/$defs/CapsulePhase"
+        },
+        "decisions": {
+          "items": {
+            "$ref": "#/$defs/Decision"
+          },
+          "title": "Decisions",
+          "type": "array"
+        },
+        "invariants": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Invariants",
+          "type": "array"
+        },
+        "memory_candidates": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Memory Candidates",
+          "type": "array"
+        },
+        "next_actions": {
+          "items": {
+            "$ref": "#/$defs/NextAction"
+          },
+          "title": "Next Actions",
+          "type": "array"
+        },
+        "objective": {
+          "title": "Objective",
+          "type": "string"
+        },
+        "open_questions": {
+          "items": {
+            "$ref": "#/$defs/OpenQuestion"
+          },
+          "title": "Open Questions",
+          "type": "array"
+        },
+        "resume_instruction": {
+          "title": "Resume Instruction",
+          "type": "string"
+        },
+        "self_assessment": {
+          "$ref": "#/$defs/SelfAssessment"
+        },
+        "tests": {
+          "items": {
+            "$ref": "#/$defs/TestRecord"
+          },
+          "title": "Tests",
+          "type": "array"
+        },
+        "workspace_state": {
+          "additionalProperties": true,
+          "title": "Workspace State",
+          "type": "object"
+        }
+      },
+      "required": [
+        "objective",
+        "current_phase",
+        "resume_instruction"
+      ],
+      "type": "object"
+    },
+    "Decision": {
+      "additionalProperties": false,
+      "properties": {
+        "alternatives": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Alternatives",
+          "type": "array"
+        },
+        "choice": {
+          "title": "Choice",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "choice",
+        "rationale"
+      ],
+      "title": "Decision",
+      "type": "object"
+    },
+    "Enforcement": {
+      "description": "How strongly a policy is actually enforced (WP-003 decision 7).\n\nA runtime reports what it *reaches*; the policy asks for what it *wants*.\nThe gap is displayed, never smoothed over.",
+      "enum": [
+        "weak",
+        "moderate",
+        "strong"
+      ],
+      "title": "Enforcement",
+      "type": "string"
+    },
+    "Message": {
+      "additionalProperties": false,
+      "properties": {
+        "attachments": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Attachments",
+          "type": "array"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "role": {
+          "default": "user",
+          "title": "Role",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "Metric": {
+      "additionalProperties": false,
+      "description": "A single measurement with the provenance of *that* value.\n\n``value`` is None exactly when the metric is unknown — never 0.\n\nThe type is intentionally **not** parametrized by int/float: JSON has one\nnumber type, so a `Metric[int]` in Python would promise a distinction the\nwire cannot carry and the TypeScript mirror could not express. Count fields\n(tokens, retries) are documented as counts and validated as such by their\nproducers.",
+      "properties": {
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance",
+          "default": "unknown"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "type": "object"
+    },
+    "MissionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "title": "Created At",
+          "type": "number"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "objective": {
+          "title": "Objective",
+          "type": "string"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "status": {
+          "default": "active",
+          "title": "Status",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "objective",
+        "created_at"
+      ],
+      "type": "object"
+    },
+    "ModelInfo": {
+      "additionalProperties": true,
+      "properties": {
+        "context_limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Limit"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "notes": {
+          "additionalProperties": true,
+          "title": "Notes",
+          "type": "object"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ModelPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "escalation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Escalation"
+        },
+        "primary": {
+          "title": "Primary",
+          "type": "string"
+        },
+        "rationale": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rationale"
+        }
+      },
+      "required": [
+        "primary"
+      ],
+      "title": "ModelPolicy",
+      "type": "object"
+    },
+    "NetworkPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allow",
+          "type": "array"
+        },
+        "deny": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Deny",
+          "type": "array"
+        },
+        "mode": {
+          "default": "allowlist",
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "NextAction": {
+      "additionalProperties": false,
+      "properties": {
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "exact_action": {
+          "title": "Exact Action",
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        }
+      },
+      "required": [
+        "exact_action"
+      ],
+      "title": "NextAction",
+      "type": "object"
+    },
+    "OpenQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "blocking": {
+          "default": false,
+          "title": "Blocking",
+          "type": "boolean"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "title": "OpenQuestion",
+      "type": "object"
+    },
+    "Permission": {
+      "additionalProperties": false,
+      "description": "A named permission with a risk level. R4 cannot be auto-granted.",
+      "properties": {
+        "granted": {
+          "default": false,
+          "title": "Granted",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "risk": {
+          "$ref": "#/$defs/RiskLevel",
+          "default": "R0"
+        },
+        "scope": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Scope",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Permission",
+      "type": "object"
+    },
+    "PluginKind": {
+      "description": "BOOK §10.",
+      "enum": [
+        "RuntimeAdapter",
+        "ToolProvider",
+        "ContextEngine",
+        "MemoryProvider",
+        "RagProvider",
+        "SandboxProvider",
+        "WorkspaceProvider",
+        "ChannelProvider",
+        "VoiceProvider",
+        "WorkflowProvider",
+        "RendererProvider",
+        "MetricsExporter",
+        "SkillProvider",
+        "ModelProvider"
+      ],
+      "title": "PluginKind",
+      "type": "string"
+    },
+    "PluginManifest": {
+      "additionalProperties": false,
+      "description": "The minimum a plugin must declare to be loadable.",
+      "properties": {
+        "config_schema": {
+          "additionalProperties": true,
+          "title": "Config Schema",
+          "type": "object"
+        },
+        "entrypoint": {
+          "title": "Entrypoint",
+          "type": "string"
+        },
+        "events_consumed": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Events Consumed",
+          "type": "array"
+        },
+        "events_produced": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Events Produced",
+          "type": "array"
+        },
+        "health_check": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Health Check"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PluginKind"
+        },
+        "model_visible_surfaces": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Model Visible Surfaces",
+          "type": "array"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Permissions",
+          "type": "array"
+        },
+        "provides": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Provides",
+          "type": "array"
+        },
+        "requires": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Requires",
+          "type": "array"
+        },
+        "unload_semantics": {
+          "default": "hot",
+          "title": "Unload Semantics",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "kind",
+        "entrypoint"
+      ],
+      "type": "object"
+    },
+    "Provenance": {
+      "description": "How a value was obtained. Never invent a sixth option silently.",
+      "enum": [
+        "provider_reported",
+        "runtime_reported",
+        "measured",
+        "estimated",
+        "unknown"
+      ],
+      "title": "Provenance",
+      "type": "string"
+    },
+    "RiskLevel": {
+      "description": "BOOK §40/§44. R4 approval is mandatory and no plugin may disable it.",
+      "enum": [
+        "R0",
+        "R1",
+        "R2",
+        "R3",
+        "R4"
+      ],
+      "title": "RiskLevel",
+      "type": "string"
+    },
+    "RuntimeInfo": {
+      "additionalProperties": true,
+      "description": "What `probe()` reports. Vendor identity is data, not a schema branch.",
+      "properties": {
+        "available": {
+          "title": "Available",
+          "type": "boolean"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/CapabilitySet"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "protocol": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Protocol"
+        },
+        "runtime_id": {
+          "title": "Runtime Id",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "runtime_id",
+        "name",
+        "available"
+      ],
+      "type": "object"
+    },
+    "RuntimePolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "fallbacks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Fallbacks",
+          "type": "array"
+        },
+        "preferred": {
+          "title": "Preferred",
+          "type": "string"
+        }
+      },
+      "required": [
+        "preferred"
+      ],
+      "title": "RuntimePolicy",
+      "type": "object"
+    },
+    "RuntimeSession": {
+      "additionalProperties": true,
+      "properties": {
+        "created_at": {
+          "title": "Created At",
+          "type": "number"
+        },
+        "detail": {
+          "additionalProperties": true,
+          "title": "Detail",
+          "type": "object"
+        },
+        "runtime_id": {
+          "title": "Runtime Id",
+          "type": "string"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "runtime_id",
+        "created_at"
+      ],
+      "type": "object"
+    },
+    "SecretPolicy": {
+      "additionalProperties": false,
+      "description": "Which secret scopes a task may resolve, by *name*, never by value.\n\nA policy refers to secrets; it never carries one. Values are resolved by the\nsecrets broker at use time (BOOK §45).",
+      "properties": {
+        "allowed": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed",
+          "type": "array"
+        },
+        "denied": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Denied",
+          "type": "array"
+        },
+        "inject_as_env": {
+          "default": true,
+          "title": "Inject As Env",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "SelfAssessment": {
+      "additionalProperties": false,
+      "properties": {
+        "concerns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Concerns",
+          "type": "array"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "not_verified": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Not Verified",
+          "type": "array"
+        }
+      },
+      "title": "SelfAssessment",
+      "type": "object"
+    },
+    "SessionSpec": {
+      "additionalProperties": false,
+      "description": "Everything a runtime needs to create a session.\n\n`allowed_tools` is deliberately **required**: a session created without an\nexplicit tool restriction silently inherits the runtime's full tool set,\nwhich is how a test turn once wrote real memory (see the Phase-0 evidence\nrecorded in V1_CONFLICTS §C12).",
+      "properties": {
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "allowed_tools": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Tools",
+          "type": "array"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "runtime_id": {
+          "title": "Runtime Id",
+          "type": "string"
+        },
+        "system_prompt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "System Prompt"
+        },
+        "workspace": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workspace"
+        }
+      },
+      "required": [
+        "agent_id",
+        "runtime_id",
+        "allowed_tools"
+      ],
+      "type": "object"
+    },
+    "TaskSpec": {
+      "additionalProperties": false,
+      "description": "A unit of work, per BOOK §7.",
+      "properties": {
+        "acceptance_gate": {
+          "$ref": "#/$defs/AcceptanceGate"
+        },
+        "artifacts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "budget": {
+          "$ref": "#/$defs/Budget"
+        },
+        "deadline": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deadline"
+        },
+        "dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "mission_id": {
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "owner_agent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Agent"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "proof": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Proof",
+          "type": "array"
+        },
+        "retries": {
+          "default": 0,
+          "title": "Retries",
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/TaskState",
+          "default": "draft"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "workspace_policy": {
+          "$ref": "#/$defs/WorkspacePolicy"
+        },
+        "workspace_scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workspace Scope"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "title",
+        "acceptance_gate"
+      ],
+      "type": "object"
+    },
+    "TaskState": {
+      "description": "BOOK §7.",
+      "enum": [
+        "draft",
+        "ready",
+        "claimed",
+        "running",
+        "waiting",
+        "review",
+        "blocked",
+        "failed",
+        "done",
+        "cancelled"
+      ],
+      "title": "TaskState",
+      "type": "string"
+    },
+    "TestRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "last_result": {
+          "title": "Last Result",
+          "type": "string"
+        },
+        "passed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Passed"
+        }
+      },
+      "required": [
+        "command",
+        "last_result"
+      ],
+      "title": "TestRecord",
+      "type": "object"
+    },
+    "TrustLevel": {
+      "description": "BOOK §10. Promotions move up this ladder; nothing starts high.",
+      "enum": [
+        "core",
+        "builtin",
+        "signed",
+        "trusted-user",
+        "user",
+        "generated",
+        "experimental",
+        "quarantined"
+      ],
+      "title": "TrustLevel",
+      "type": "string"
+    },
+    "UsageSample": {
+      "additionalProperties": false,
+      "description": "The universal usage record (BOOK §17/§49).\n\nEvery numeric field is a :class:`Metric`, so `estimated` can never be\nmistaken for `provider_reported` and a missing value can never read as zero.",
+      "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent"
+        },
+        "cache_read_tokens": {
+          "$ref": "#/$defs/Metric"
+        },
+        "cache_write_tokens": {
+          "$ref": "#/$defs/Metric"
+        },
+        "compaction_input": {
+          "$ref": "#/$defs/Metric"
+        },
+        "compaction_output": {
+          "$ref": "#/$defs/Metric"
+        },
+        "context_limit": {
+          "$ref": "#/$defs/Metric"
+        },
+        "context_tokens": {
+          "$ref": "#/$defs/Metric"
+        },
+        "duration_ms": {
+          "$ref": "#/$defs/Metric"
+        },
+        "estimated_cost": {
+          "$ref": "#/$defs/Metric"
+        },
+        "input_tokens": {
+          "$ref": "#/$defs/Metric"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "output_tokens": {
+          "$ref": "#/$defs/Metric"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "provider_cost": {
+          "$ref": "#/$defs/Metric"
+        },
+        "reasoning_tokens": {
+          "$ref": "#/$defs/Metric"
+        },
+        "retries": {
+          "$ref": "#/$defs/Metric"
+        },
+        "retrieval_tokens": {
+          "$ref": "#/$defs/Metric"
+        },
+        "run": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run"
+        },
+        "runtime": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session"
+        },
+        "system_tokens": {
+          "$ref": "#/$defs/Metric"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task"
+        },
+        "tool_duration_ms": {
+          "$ref": "#/$defs/Metric"
+        },
+        "tool_result_tokens": {
+          "$ref": "#/$defs/Metric"
+        },
+        "tool_schema_tokens": {
+          "$ref": "#/$defs/Metric"
+        },
+        "ttft_ms": {
+          "$ref": "#/$defs/Metric"
+        }
+      },
+      "type": "object"
+    },
+    "WorkspacePolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "deny": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Deny",
+          "type": "array"
+        },
+        "enforcement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Enforcement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "enforcement_detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enforcement Detail"
+        },
+        "include": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Include",
+          "type": "array"
+        },
+        "network": {
+          "$ref": "#/$defs/NetworkPolicy"
+        },
+        "readonly": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Readonly",
+          "type": "array"
+        },
+        "secrets": {
+          "$ref": "#/$defs/SecretPolicy"
+        },
+        "write": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Write",
+          "type": "array"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$id": "https://meta-harness.local/contracts/contracts.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Meta-Harness v2 contracts",
+  "x-contract-version": 1,
+  "x-contracts": [
+    "Metric",
+    "UsageSample",
+    "CanonicalEvent",
+    "CapabilityInfo",
+    "CapabilitySet",
+    "RuntimeInfo",
+    "ModelInfo",
+    "Message",
+    "SessionSpec",
+    "RuntimeSession",
+    "NetworkPolicy",
+    "SecretPolicy",
+    "WorkspacePolicy",
+    "Budget",
+    "AcceptanceGate",
+    "MissionSpec",
+    "TaskSpec",
+    "ArtifactRef",
+    "ApprovalRequest",
+    "ActionProposal",
+    "ContextCapsule",
+    "PluginManifest",
+    "AgentSpec",
+    "AgentVersion"
+  ]
+}

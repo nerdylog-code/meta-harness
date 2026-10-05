@@ -99,6 +99,14 @@ class TestEventBus(unittest.TestCase):
         self.assertEqual(healthy.get_nowait().payload["n"], 0)
         self.assertEqual(slow.qsize(), 1)
 
+    def test_payload_carries_a_version(self) -> None:
+        """The frozen contract: every payload declares its own version."""
+        bus = EventBus()
+        event = bus.publish("system.tick", {"n": 1})
+        self.assertEqual(event.payload["v"], 1)
+        explicit = bus.publish("system.tick", {"v": 2, "n": 2})
+        self.assertEqual(explicit.payload["v"], 2)
+
     def test_stream_yields_published_events(self) -> None:
         bus = EventBus()
 

@@ -24,6 +24,7 @@ SUITES: dict[str, list[str]] = {
     "v1": ["run_all.py", "tests/run_all.py"],  # v1's own runner (regression asset)
     "unit": ["tests/unit", "-"],
     "integration": ["tests/integration", "-"],
+    "contracts": ["tests/contracts", "-"],
 }
 
 
@@ -68,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
             print(name)
         return 0
 
-    selected = args.suite or ["v1", "unit", "integration"]
+    selected = args.suite or ["v1", "unit", "contracts", "integration"]
     results: dict[str, int] = {}
     for name in selected:
         if name == "v1":

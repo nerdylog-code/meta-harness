@@ -9,7 +9,7 @@ Numbering policy: **numbers reserved by PROJECT_BOOK §Appendix A are kept for t
 | 0003 | SQLite is the canonical source of state and events; JSONL is export/debug only | **accepted** 2026-10-05 | `ADR-0003-sqlite-canonical-state.md` |
 | 0004 | Web-first UI + Tauri shell | reserved (BOOK A#4) | — |
 | 0005 | Python daemon | reserved (BOOK A#5) | — |
-| 0006 | RuntimeAdapter v2 | reserved (BOOK A#6) — written by WP-003 | — |
+| 0006 | RuntimeAdapter v2 — one async interface, explicit capabilities | **accepted** 2026-10-05 | `ADR-0006-runtime-adapter-v2.md` |
 | 0007 | Progressive tool disclosure | reserved (BOOK A#7) | — |
 | 0008 | Tool output virtualization | reserved (BOOK A#8) | — |
 | 0009 | Context Capsule architecture | reserved (BOOK A#9) | — |
@@ -20,8 +20,9 @@ Numbering policy: **numbers reserved by PROJECT_BOOK §Appendix A are kept for t
 | 0014 | Structured protocols only; no ANSI scraping | **accepted** 2026-10-05 | `ADR-0014-structured-protocol-over-ansi-scraping.md` |
 | 0015 | Self-improvement requires staging/eval | reserved (BOOK A#15) | — |
 | 0016 | Hermes transport: ACP over stdio primary; TUI gateway JSON-RPC as declared alternative | **accepted** 2026-10-05 | `ADR-0016-hermes-transport-acp-stdio.md` |
+| 0017 | Event envelope: fixed keys, versioned payloads, tolerant edges | **accepted** 2026-10-05 | `ADR-0017-event-envelope.md` |
 
-**0016 exists because the Book's Appendix A does not name a decision for transport selection.** Rather than reuse a reserved number (which would recreate the ambiguity C7 was about), the next free number is used.
+**0016 and 0017 exist because the Book's Appendix A does not name a decision for transport selection or for the envelope's payload-versioning rule.** Rather than reuse a reserved number (which would recreate the ambiguity C7 was about), the next free numbers are used.
 
 ## Decisions recorded elsewhere (not ADR numbers)
 
@@ -36,7 +37,7 @@ Numbering policy: **numbers reserved by PROJECT_BOOK §Appendix A are kept for t
 
 | # | Question | Needs |
 |---|---|---|
-| Q1 | `RuntimeAdapter` v2 exact surface + `CapabilitySet` taxonomy | Architect sign-off, WP-003 |
-| Q2 | Canonical event envelope finalization + namespace freeze | Architect sign-off, WP-003 |
-| Q3 | Whether Pi's adapter follows ACP (one client) or stays on `pi --mode rpc` | WP-003/WP-015 — the Book's §13 prefers `--mode rpc`; ACP is measured. Reversible either way |
-| Q4 | OMP and OpenClaw adapter transports | later phases; not blocking WP-002/WP-003 |
+| Q3 | Whether Pi's adapter follows ACP (one client) or stays on `pi --mode rpc` | Settled when the Pi adapter is written (WP-015) — the Book's §13 prefers `--mode rpc`; ACP is measured and shared with the Hermes adapter |
+| Q4 | OMP and OpenClaw adapter transports | later phases; not blocking WP-004 |
+
+**Resolved by WP-003 (2026-10-05):** Q1 (`RuntimeAdapter` surface + `CapabilitySet` taxonomy → ADR-0006) and Q2 (canonical envelope + namespace freeze → ADR-0017).

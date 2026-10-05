@@ -18,8 +18,8 @@ WP-001, WP-002 and WP-005 are closed/holding; WP-003 (contracts) is the next pac
 | WP-001 — Freeze V1 | **done** — tag on `3ef4a5c` byte-for-byte, branch `v2/control-plane`, bytecode untracked, dashboard tab retired |
 | WP-002 — V2 repository skeleton | **done** — daemon, event plane, layout, four cross-platform scripts, two-OS CI, web placeholder |
 | WP-005 — ProcessSupervisor | **done on POSIX** (12/12 real-process tests, zero orphans verified) · Windows implementation written, unexecuted |
-| WP-003 — Contracts foundation | **next** — needs Architect sign-off on the contract freeze |
-| WP-004 — Event store v2 | blocked by WP-003 |
+| WP-003 — Contracts foundation | **done** — 24 wire contracts, per-metric provenance, payload-bound approvals, `RuntimeAdapter` v2, `FakeRuntimeAdapter` + conformance suite, generated JSON Schema + TypeScript mirror in parity (113 tests) |
+| WP-004 — Event store v2 | **next** — unblocked by the frozen contracts (ADR-0003, ADR-0017) |
 | WP-006 / WP-007 — Web / Tauri | WP-006 unblocked; WP-007 follows WP-006 |
 
 ## Working (verified in this checkout)
