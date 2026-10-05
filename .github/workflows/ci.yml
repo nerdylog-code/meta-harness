@@ -1,16 +1,67 @@
 name: ci
 
+# Superseded the original Linux-only job (which ran `pip install pyyaml` +
+# `python tests/run_all.py`) with a two-OS matrix: the same frozen v1 suite now
+# runs on Windows as well, its PyYAML dependency comes from `uv sync`, and the
+# v2 suites run beside it. BOOK §68: no merge with Windows red.
+
 on: [push, pull_request, workflow_dispatch]
 
 jobs:
-  tests:
-    runs-on: ubuntu-latest
+  core:
+    name: core (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.12"]
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: dependências (yaml é usado pelo plugin de topologia)
-        run: python -m pip install --quiet pyyaml
-      - name: testes
-        run: python tests/run_all.py
+          python-version: ${{ matrix.python }}
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: sync dependencies
+        run: uv sync --frozen
+
+      - name: doctor (informational)
+        continue-on-error: true
+        run: python scripts/doctor.py
+
+      - name: v1 regression suite (frozen MVP)
+        run: python scripts/test.py --suite v1
+
+      - name: v2 unit suite
+        run: python scripts/test.py --suite unit
+
+      - name: v2 integration suite (real server + websockets)
+        run: python scripts/test.py --suite integration
+
+  web:
+    name: web
+    runs-on: ubuntu-latest
+    if: ${{ hashFiles('apps/web/package.json') != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - name: install
+        working-directory: apps/web
+        run: pnpm install --frozen-lockfile
+      - name: typecheck
+        working-directory: apps/web
+        run: pnpm run typecheck
+      - name: build
+        working-directory: apps/web
+        run: pnpm run build
