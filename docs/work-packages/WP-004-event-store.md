@@ -22,7 +22,7 @@ apps/daemon/metaharness/export/**           (JSONL exporter — the compat path 
 tests/unit/store/**  tests/integration/replay/**
 docs/architecture/EVENTS.md                 (append a "storage & replay" section)
 docs/architecture/STORAGE.md                (new)
-docs/adr/ADR-0007-sqlite-canonical.md
+docs/adr/ADR-0003-sqlite-canonical-state.md
 ```
 
 ## Forbidden files

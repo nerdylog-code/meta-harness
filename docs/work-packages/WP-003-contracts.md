@@ -32,7 +32,7 @@ packages/contracts/**                     (the deliverable)
 docs/architecture/DOMAIN.md               (domain vocabulary, BOOK §7)
 docs/architecture/EVENTS.md               (canonical event catalogue, BOOK §13)
 docs/architecture/RUNTIMES.md             (RuntimeAdapter v2 + capability matrix, BOOK §12)
-docs/adr/ADR-0002-*.md … ADR-0006-*.md    (one ADR per decision this package freezes)
+docs/adr/ADR-0006-runtime-adapter-v2.md + the event-envelope ADR   (this package freezes them; see docs/adr/README.md for numbering)
 tests/contracts/**                        (schema round-trip, validation, versioning)
 ```
 
