@@ -66,8 +66,16 @@ run is not evidence of a working cross-platform skeleton.
 
 | Gap | Status |
 |---|---|
-| Windows CI has not yet executed the current tree (the workflow exists; the first push will tell) | pending authorisation to push |
+| ~~Windows CI has not yet executed the current tree~~ | **closed 2026-10-05**: the matrix ran green on `windows-latest` — v1 (21), unit (28), contracts (113, incl. the parity and tsc checks) and the integration suite (13 process-supervisor tests + 4 event-stream tests) |
 | No Windows-specific sandbox/isolation provider | later phases; worktree isolation is the default and needs no sandbox |
 | Tauri bundle (MSI/NSIS) | WP-007 |
 | Packaged daemon without a Python requirement | PHASE 27 |
 | File locking around SQLite WAL on Windows | WP-004 runs its restart/crash tests on Windows CI |
+
+## 7. What the Windows run actually taught us
+
+The first matrix run failed on Windows only, and the failure was real (recorded in
+`PROCESS_SUPERVISION.md`): a process tree reaped mid-walk raised
+`psutil.NoSuchProcess` out of `kill_tree`, and one test asserted a POSIX
+termination behaviour as if it were universal. Linux had passed 13/13 for hours.
+That is the whole argument for the matrix: a green Linux run was not evidence.

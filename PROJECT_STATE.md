@@ -10,17 +10,17 @@ Concise checkpoint. Not a diary. (BOOK §111/§112.)
 ## Current phase
 
 **WP-002 complete — the v2 control plane skeleton boots on both target platforms.**
-**WP-005 (ProcessSupervisor) implemented and green on Linux; its Windows half is written and targeted by tests but not yet executed (needs the first CI run).**
-WP-001, WP-002 and WP-005 are closed/holding; WP-003 (contracts) is the next package and it is a contract freeze — Architect sign-off required.
+**The CI matrix is green on `ubuntu-latest` and `windows-latest`** (run `37377861032`, all four suites on both OSes), which closes the WP-002 and WP-005 gates with measured evidence instead of a written contract. The remote branch is `v2/control-plane`; `master` and the tag `v0.1-hermes-hosted` are untouched.
+WP-001, WP-002, WP-003 and WP-005 are closed with their gates met. Next: WP-004 (event store) and WP-006 (web shell), which are independent and can run in parallel.
 
 | WP | State |
 |---|---|
 | WP-001 — Freeze V1 | **done** — tag on `3ef4a5c` byte-for-byte, branch `v2/control-plane`, bytecode untracked, dashboard tab retired |
-| WP-002 — V2 repository skeleton | **done** — daemon, event plane, layout, four cross-platform scripts, two-OS CI, web placeholder |
-| WP-005 — ProcessSupervisor | **done on POSIX** (12/12 real-process tests, zero orphans verified) · Windows implementation written, unexecuted |
-| WP-003 — Contracts foundation | **done** — 24 wire contracts, per-metric provenance, payload-bound approvals, `RuntimeAdapter` v2, `FakeRuntimeAdapter` + conformance suite, generated JSON Schema + TypeScript mirror in parity (113 tests) |
+| WP-002 — V2 repository skeleton | **done, gate closed** — daemon, event plane, layout, four cross-platform scripts, **two-OS CI green (ubuntu + windows)**, web placeholder |
+| WP-005 — ProcessSupervisor | **done, gate closed** — the same suite passes on **Windows and Linux**; zero orphans verified on both (BOOK §79 gate) |
+| WP-003 — Contracts foundation | **done and signed off** — 24 wire contracts, per-metric provenance, payload-bound approvals, `RuntimeAdapter` v2, `FakeRuntimeAdapter` + conformance suite, generated JSON Schema + TypeScript mirror in parity (113 tests, runs on both OSes) |
 | WP-004 — Event store v2 | **next** — unblocked by the frozen contracts (ADR-0003, ADR-0017) |
-| WP-006 / WP-007 — Web / Tauri | WP-006 unblocked; WP-007 follows WP-006 |
+| WP-006 / WP-007 — Web / Tauri | WP-006 unblocked (parallel with WP-004); WP-007 follows WP-006 |
 
 ## Working (verified in this checkout)
 
@@ -64,12 +64,12 @@ git log --oneline --decorate -6
 
 ## Honest limitations
 
-- **Windows has not executed this tree yet.** The CI matrix is written; it runs on the first push, which is not authorised. Until then, Windows support is a written contract, not a measured fact.
-- The v2 suites run on the local Python 3.12 environment; the v1 suite also passes under the Hermes venv interpreter (3.13) and fails under a bare 3.14 without PyYAML (documented in `V1_INVENTORY.md` D9).
+- The v2 suites run locally on Python 3.12; the v1 suite also passes under the Hermes venv interpreter (3.13). A bare 3.14 without PyYAML fails the v1 suite, which `scripts/test.py` now diagnoses with the interpreter path and the exact command to use.
 - The web page's **DOM was not exercised in a browser** — only the HTTP delivery of the bundle was verified. Visual QA belongs to WP-006.
 - `StaticFiles(html=True)` does **not** provide SPA fallback: an unknown path returns 404 rather than index.html. The router arrives with WP-006 and must add the fallback.
 - Durability is absent by design: the event ring is in memory, so a restart loses events. WP-004 makes SQLite canonical (ADR-0003).
-- `doctor.py` exits 2 when only warnings remain (missing pnpm/node/web bundle), which is information, not failure.
+- `doctor.py` exits 2 when only warnings remain (missing pnpm/node/web bundle), which is information, not failure; CI calls it with `--report-only` because a runner is expected to be partial.
+- CI prints two deprecation notices from third-party actions (Node 20 → 24) and one runner-label migration notice. Neither affects our code; the action versions are pinned and will be bumped deliberately.
 
 ---
 
