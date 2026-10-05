@@ -10,6 +10,7 @@ guess — that ambiguity is what produced v1's D1 defect.
 
 from __future__ import annotations
 
+import argparse
 import importlib
 import os
 import shutil
@@ -32,8 +33,17 @@ def record(name: str, ok: bool, *, warn_only: bool = False) -> None:
     CHECKS.append((("WARN" if warn_only else "OK") if ok else ("WARN" if warn_only else "FAIL"), name))
 
 
-def main() -> int:
-    print("Meta-Harness v2 — doctor")
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Diagnose the local Meta-Harness installation.")
+    parser.add_argument(
+        "--report-only",
+        action="store_true",
+        help="always exit 0 and only print the verdict (for environments that are "
+        "expected to be partial, such as a CI runner without pnpm or a built web bundle)",
+    )
+    args = parser.parse_args(argv)
+
+    print("Meta-Harness v2 - doctor")
     print(f"  repo root : {REPO_ROOT}")
     print(f"  python    : {sys.version.split()[0]} ({sys.executable})")
     print()
@@ -95,8 +105,12 @@ def main() -> int:
 
     fails = sum(1 for level, _ in CHECKS if level == "FAIL")
     warns = sum(1 for level, _ in CHECKS if level == "WARN")
+    verdict = "FAIL" if fails else ("WARN" if warns else "PASS")
     print()
-    print(f"result: {'FAIL' if fails else ('WARN' if warns else 'PASS')} ({fails} fail, {warns} warn)")
+    print(f"result: {verdict} ({fails} fail, {warns} warn)")
+    if args.report_only:
+        print("(report-only: exit code forced to 0)")
+        return 0
     return 1 if fails else (2 if warns else 0)
 
 
