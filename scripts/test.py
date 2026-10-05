@@ -27,6 +27,27 @@ SUITES: dict[str, list[str]] = {
     "contracts": ["tests/contracts", "-"],
 }
 
+#: Modules each suite needs in the interpreter that runs it. Checked up front so
+#: a wrong interpreter produces a diagnosis instead of a traceback: on a clean CI
+#: runner `python` is the toolcache interpreter, not the `.venv` that `uv sync`
+#: created, and the v1 suite alone needs PyYAML (pulled in by uvicorn[standard]).
+SUITE_REQUIREMENTS: dict[str, tuple[str, ...]] = {
+    "v1": ("yaml",),
+    "unit": ("fastapi", "platformdirs"),
+    "contracts": ("pydantic",),
+    "integration": ("fastapi", "websockets", "psutil"),
+}
+
+
+def missing_requirements(suite: str) -> list[str]:
+    missing = []
+    for module in SUITE_REQUIREMENTS.get(suite, ()):
+        try:
+            __import__(module)
+        except Exception:
+            missing.append(module)
+    return missing
+
 
 def run_v1() -> int:
     script = TESTS / "run_all.py"
@@ -72,6 +93,17 @@ def main(argv: list[str] | None = None) -> int:
     selected = args.suite or ["v1", "unit", "contracts", "integration"]
     results: dict[str, int] = {}
     for name in selected:
+        missing = missing_requirements(name)
+        if missing:
+            print(
+                f"[test] {name}: missing dependencies in this interpreter: {', '.join(missing)}\n"
+                f"[test] {name}: interpreter is {sys.executable}\n"
+                f"[test] hint: run via `uv run python scripts/test.py --suite {name}`, "
+                "or activate the project virtualenv first",
+                file=sys.stderr,
+            )
+            results[name] = 1
+            continue
         if name == "v1":
             results[name] = run_v1()
         else:

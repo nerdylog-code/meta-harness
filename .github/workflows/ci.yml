@@ -33,22 +33,22 @@ jobs:
 
       - name: doctor (informational)
         continue-on-error: true
-        run: python scripts/doctor.py
+        run: uv run python scripts/doctor.py
 
       - name: v1 regression suite (frozen MVP)
-        run: python scripts/test.py --suite v1
+        run: uv run python scripts/test.py --suite v1
 
       - name: v2 unit suite
-        run: python scripts/test.py --suite unit
+        run: uv run python scripts/test.py --suite unit
 
       - name: shared contracts + Python/TypeScript parity
-        run: python scripts/test.py --suite contracts
+        run: uv run python scripts/test.py --suite contracts
 
       - name: typecheck the generated TypeScript contracts
         run: npx --yes typescript@5.6.3 tsc -p packages/contracts/ts/tsconfig.json
 
       - name: v2 integration suite (real server + websockets)
-        run: python scripts/test.py --suite integration
+        run: uv run python scripts/test.py --suite integration
 
   web:
     name: web
