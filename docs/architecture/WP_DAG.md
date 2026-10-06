@@ -1,6 +1,6 @@
 # First wave — dependency DAG and work packages
 
-**Status (2026-10-05):** WP-001 **done** · WP-002 **done, gate closed** (two-OS CI green) · WP-003 **done and signed off** (contracts frozen: ADR-0006 + ADR-0017) · WP-004 **done** (canonical store: migrations, append-only log, transactional projections, artifact externalization, replay equivalence, JSONL export, boot reconciliation; A1–A9 green locally, A10 in CI) · WP-005 **done, gate closed** (the supervisor suite passes on Windows and Linux, zero orphans on both). Next: **WP-006 (web shell)** and the daemon↔store wiring slice that WP-004 deliberately left out.
+**Status (2026-10-05):** WP-001 **done** · WP-002 **done, gate closed** · WP-003 **done and signed off** · WP-004 **done** (canonical store, A1–A9 green, A10 in CI) · WP-005 **done, gate closed** · **daemon↔store wiring done** (not a WP of its own: the API persists through the store and the duplicate envelope is deleted) · WP-006 **done** (web shell: router, query, one websocket, event inspector, honest shells; DOM verified in headless Chromium). Next: **the Pi RuntimeAdapter and the M1 slice**; WP-007 follows it.
 
 **Source:** PROJECT_BOOK §72 (*First engineering wave*), §75 (parallelism rule: 3–5 builders per wave), §67 (work-package format).
 **Baseline:** `nerdylog-code/meta-harness @ 3ef4a5c`, no tags, `master` only.

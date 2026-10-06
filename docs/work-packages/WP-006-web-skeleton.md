@@ -2,6 +2,38 @@
 
 **Owner:** Flash-class builder · **Wave:** W3 · **Depends on:** WP-002 · **Runs in parallel with:** WP-003 and WP-005 · **Feeds:** WP-007
 
+**Status: done.** What was built, and the deviations that were decided rather than assumed:
+
+- **Router:** TanStack Router with **code-based** routes (`src/router.tsx`). File-based routing
+  would add a codegen plugin and a second source of truth for four destinations; the Book's
+  full information architecture is worth revisiting this for, and that is recorded here.
+- **Query:** TanStack Query with one shared `QueryClient`; the daemon stays the system of
+  record and nothing domain-shaped is cached client-side.
+- **One websocket.** The stream lives in a context provider (`src/stream.tsx`) because two
+  components need it and two sockets would make the daemon's subscriber count a lie.
+  Connection state is three-valued — `connecting` / `live` / `degraded` — with capped
+  exponential backoff, and the inspector always says whether it is showing the live socket or
+  the durable backlog. A dead socket is never rendered as "no events".
+- **Shells:** missions, agents and runtime pages derive what they can from the log and state
+  plainly what does not exist yet. No invented rows, no always-zero gauges, no "create agent"
+  button the daemon could not honour.
+- **Deferred on purpose:** Tailwind and Radix (BOOK §9.2). They belong with the design system
+  work (PHASE 8); the skeleton uses plain CSS tokens as the seam, so introducing them later
+  replaces one file instead of every component.
+- **SPA fallback added to the daemon.** Client-side routing needs it: `StaticFiles(html=True)`
+  answers 404 for a deep link. The daemon now serves the shell for non-API paths, keeps real
+  files winning, refuses traversal with 403, and still answers 404 JSON for `/v1/*`.
+- **Supply chain:** `@tanstack/react-router` is pinned to an exact version (`1.170.41`)
+  because 1.169.5 and 1.169.8 are flagged as malicious; a caret range could resolve to one.
+
+**Verified in a real browser**, not by inspection: built bundle served by a live daemon,
+rendered in headless Chromium — the shell, sidebar, store panel, reconciliation panel and
+event table all present, the connection badge reading `live` (the socket really connected),
+5 event rows on the overview and 6 in the inspector with their real kinds, an explicit empty
+state on `/agents`, deep links returning the shell (200), `/v1/nope` returning JSON 404, and
+`curl --path-as-is` traversal attempts (`../`, `%2e%2e`, mixed) all refused with 403 and no
+file content.
+
 ---
 
 ## Objective

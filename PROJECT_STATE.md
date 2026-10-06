@@ -27,7 +27,8 @@ closed the WP-002 and WP-005 gates with measured evidence instead of a written c
 | WP-005 — ProcessSupervisor | **done, gate closed** — the same suite passes on **Windows and Linux**; zero orphans verified on both (BOOK §79 gate) |
 | WP-003 — Contracts foundation | **done and signed off** — 24 wire contracts, per-metric provenance, payload-bound approvals, `RuntimeAdapter` v2, `FakeRuntimeAdapter` + conformance suite, generated JSON Schema + TypeScript mirror in parity (113 tests, runs on both OSes) |
 | WP-004 — Event store v2 | **done** — SQLite canonical (ADR-0003 implemented): 3 migrations, append-only log enforced by triggers, transactional projections, idempotent appends, content-addressed artifacts, replay equivalence on 10 007 events, JSONL export, boot reconciliation in its own package |
-| WP-006 / WP-007 — Web / Tauri | **next** — WP-006 unblocked; WP-007 follows WP-006 |
+| WP-006 — Web shell | **done** — TanStack Router + Query, one websocket in context with an honest three-state connection, event inspector (live or durable backlog, labelled), mission/agents/system shells that state what does not exist yet; DOM verified in headless Chromium |
+| WP-007 — Tauri shell | **after the M1 slice** — it packages something that already works |
 
 ## Working (verified in this checkout)
 
@@ -47,7 +48,7 @@ closed the WP-002 and WP-005 gates with measured evidence instead of a written c
 - **Boot reconciliation** `apps/daemon/metaharness/reconcile`: reads persisted state, asks a `ProcessProbe`, appends `run.interrupted` with `orphaned=true`, and never resumes work. Deliberately outside the store.
 - **Tests**: v1 regression 21/21 · v2 unit 27/27 · contracts 113/113 · **store 54/54** · integration 16/16 · **replay 21/21** (real server, real websockets, real process trees, real hard kills; the whole default run is ~80 s).
 - **ProcessSupervisor** `apps/daemon/metaharness/process`: one interface, two OS implementations, pre-signal tree snapshot, verified kill (`orphan_check` inside the emitted event), bounded streams, wall-timeout budget. Design and the orphan bug it fixed: `docs/architecture/PROCESS_SUPERVISION.md`.
-- **Web placeholder** `apps/web`: Vite + React + TS + TanStack Query; `pnpm typecheck` clean, `pnpm build` produces `dist/` and the daemon serves it (verified: `/health` reports the bundle, `GET /` returns index.html, the JS asset answers 200).
+- **Web shell** `apps/web` (WP-006): Vite + React + TS + TanStack Query + TanStack Router (code-based routes), one websocket owned by a context provider, connection state that distinguishes live from degraded from connecting, an event inspector that always says whether it is showing the live socket or the durable backlog, and a sidebar that marks unbuilt surfaces as `soon` instead of linking to nowhere. Built bundle is served by the daemon with an SPA fallback; deep links work and path traversal is refused (403, verified with `curl --path-as-is`). DOM verified in headless Chromium: the shell renders, the badge reads `live`, and the log's events appear.
 - **CI** `.github/workflows/ci.yml`: matrix `ubuntu-latest` + `windows-latest`, six suites (v1, unit, contracts, store, integration, replay), plus a web job gated on `apps/web/package.json`.
 
 ## Not yet built (explicitly)
@@ -60,10 +61,10 @@ next slice).
 
 ## Next
 
-1. **WP-006 — web shell** (unblocked; the New Control UI skeleton, no heavy polish yet).
-2. **Pi RuntimeAdapter + the M1 vertical slice** (BOOK §75/§116) — the precondition is met:
-   WP-003, WP-004 and WP-005 are green, and the daemon now reads and writes the store.
-3. **WP-007 — Tauri shell** (after the slice; it packages something that already works).
+1. **Pi RuntimeAdapter + the M1 vertical slice** (BOOK §75/§116) — the precondition is met:
+   WP-003, WP-004, WP-005 and WP-006 are green, and the daemon reads and writes the store.
+   The web shell has somewhere for an agent to appear.
+2. **WP-007 — Tauri shell** (after the slice; it packages something that already works).
 
 ## Important decisions
 

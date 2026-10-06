@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
 
 from . import paths
@@ -270,6 +270,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     web_root = settings.resolved_web_root()
     if web_root is not None:
-        app.mount("/", StaticFiles(directory=str(web_root), html=True), name="web")
+        assets_dir = web_root / "assets"
+        if assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+        index_file = web_root / "index.html"
+        resolved_root = web_root.resolve()
+
+        @app.get("/{path:path}")
+        async def spa_fallback(path: str):  # noqa: ANN202 - FastAPI route
+            """Serve the client-side shell for router paths.
+
+            `StaticFiles(html=True)` answers 404 for an unknown path, which breaks every deep
+            link the router creates (`/events`, `/agents`, ...). Real files still win; anything
+            else that is not an API path gets the shell. API paths keep returning 404 rather
+            than an HTML page, so a wrong URL is never mistaken for a working endpoint.
+            """
+            if path.startswith("v1/") or path in {"health", "version"}:
+                return JSONResponse({"error": "not found", "path": path}, status_code=404)
+            candidate = (resolved_root / path).resolve()
+            try:
+                candidate.relative_to(resolved_root)
+            except ValueError:
+                return JSONResponse({"error": "forbidden", "path": path}, status_code=403)
+            if path and candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(index_file)
 
     return app

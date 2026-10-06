@@ -1,16 +1,18 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { App } from "./App";
+import { RouterProvider } from "@tanstack/react-router";
+import { router } from "./router";
 import "./styles.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // The shell polls while the socket is the fast path; a failed fetch must
-      // surface as an error state, never as an eternal spinner (BOOK §82).
+      // The daemon is local; one retry covers a restart. A failed fetch must surface as an
+      // error state, never as an eternal spinner (BOOK §82).
       retry: 1,
       refetchOnWindowFocus: false,
+      staleTime: 2000,
     },
   },
 });
@@ -23,7 +25,7 @@ if (!rootElement) {
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <RouterProvider router={router} />
     </QueryClientProvider>
   </React.StrictMode>,
 );
