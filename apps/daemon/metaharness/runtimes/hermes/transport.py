@@ -217,7 +217,13 @@ class AcpTransport:
                 self._protocol_error(f"line of {len(raw)} bytes exceeds the {MAX_LINE_BYTES} cap")
                 continue
             self.stats.bytes_in += len(raw)
-            text = raw.decode("utf-8", errors="replace").strip()
+            try:
+                # Strict on purpose: `errors="replace"` turns an encoding mismatch into a silently
+                # mangled string, which is how a cp1252 bullet survived until Windows CI caught it.
+                text = raw.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                self._protocol_error(f"line is not valid UTF-8: {raw[:80]!r}")
+                continue
             if not text:
                 continue
             try:

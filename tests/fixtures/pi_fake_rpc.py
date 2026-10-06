@@ -51,6 +51,13 @@ def emit(record: dict, *, crlf: bool = False) -> None:
 
 
 def main() -> int:
+    try:
+        # UTF-8 explicitly: the Windows default is cp1252, and a non-ASCII character written there
+        # and read as UTF-8 arrives mangled. This peer was green on Windows only because no test
+        # exercised its non-ASCII path; the Hermes peer proved the trap is real.
+        sys.stdout.reconfigure(encoding="utf-8", newline="\n")  # type: ignore[union-attr]
+    except (AttributeError, ValueError):  # pragma: no cover
+        pass
     parser = argparse.ArgumentParser()
     parser.add_argument("--junk", action="store_true")
     parser.add_argument("--u2028", action="store_true")

@@ -25,6 +25,9 @@ VERSION = "0.21.5"
 
 
 def emit(payload: dict) -> None:
+    # UTF-8 explicitly. On Windows the default stdout encoding is cp1252, and a bullet written
+    # as 0x95 then read as UTF-8 arrives as U+FFFD -- which is how this peer broke the Windows CI
+    # while passing on Linux, where the default is already UTF-8.
     sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
     sys.stdout.flush()
 
@@ -42,6 +45,10 @@ def update(session_id: str, payload: dict) -> None:
 
 
 def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", newline="\n")  # type: ignore[union-attr]
+    except (AttributeError, ValueError):  # pragma: no cover - already configured
+        pass
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-tools", action="store_true")
     parser.add_argument("--hang", action="store_true")
