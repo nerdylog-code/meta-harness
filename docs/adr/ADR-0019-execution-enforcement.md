@@ -117,3 +117,23 @@ the same user's processes; on a single-user desktop that is the same trust domai
 * The desktop shell keeps its guarantees: the renderer gets no capability and no secret, and the
   session's policy is visible in the Agent Inspector with badges that can say `WEAK`, `SOFT LIMIT`
   and `NOT ENFORCED`.
+
+## The network is the weak dimension, and the M3 run proved why
+
+The end-to-end run found the hole the evidence model predicted. With `network: unrestricted` the
+sandbox shares the host's network namespace, so the agent — thirty tool calls in — port-scanned
+loopback, found the control plane's own API, enumerated `/v1/...` and read another session's
+transcript, which is where the canary token was. The **filesystem** boundary held throughout: the
+repository was absent inside the sandbox and the canary file was unreadable.
+
+The record was right. `isolation` was `weak` for that session precisely because the network was
+open, while `filesystem` was `strong`. That is what per-dimension levels are for: one aggregate
+badge would have claimed either "isolated" (false) or "exposed" (also false).
+
+What this means for the next piece of work: a namespace cannot contain the network without also
+taking away the runtime's ability to reach its own model provider — with `network: restricted` the
+runtime cannot answer at all, which the same run demonstrates. Containing egress while keeping the
+model reachable is a *filtering* problem (an allowlisted proxy, or namespace egress rules), not a
+mount problem. Until that exists, an open network is honestly `weak`, and the control plane's own
+API is part of what an agent can reach. Authentication on the API is a separate and complementary
+answer, and it is not built either.

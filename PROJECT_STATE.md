@@ -168,6 +168,14 @@ git log --oneline --decorate -6
   the policy engine, the budget engine and the lifecycle stay green there. The container provider
   reports `unavailable` with the reason when no daemon is reachable (`the daemon is not reachable at
   /var/run/docker.sock`) — it is not silently skipped.
+- **The network is the weak dimension of the boundary, and the M3 run showed what that costs.** With
+  `network: unrestricted` a sandboxed agent shares the host's loopback: it port-scanned, found the
+  daemon's own `/v1/...` API and read another session's transcript (which is where the run's canary
+  token was). The filesystem stayed strong — the repository was absent inside and the canary file
+  unreadable — and `isolation: weak` was recorded for exactly this reason, so the record was right
+  while the claim "the agent cannot leave" was not. With `network: restricted` nothing is reachable,
+  including the runtime's own model provider, so the runtime cannot answer. Egress filtering with
+  the provider allowlisted is the fix; it is not built, and the API has no authentication either.
 - **A sandboxed runtime's credential is passed in its environment**, which puts it in the sandbox's
   argv: visible to the same user's processes. On a single-user desktop that is the same trust
   domain, and the runtime's own credentials file (`~/.hermes/.env`, staged 0600) is the mechanism
