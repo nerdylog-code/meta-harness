@@ -36,7 +36,7 @@ CI matrix is green on `ubuntu-latest` and `windows-latest`.
 | WP-018 — Runtime conformance | **done** — 18 tests against a scripted peer that speaks the *captured* wire format, including the RPC tool-event names; runs in the CI matrix on both OSes |
 | WP-019 — Agent/Session projections + API + Chat UI | **done** — migration 0004, three projections, `/v1/missions`, `/v1/agents`, `/v1/sessions`, messages, cancel, events; the roster and the agent page with a composer, streaming text, usage with provenance, tool list and cancel |
 | WP-020 — Runtime events UI | **done, folded into the agent page** — usage with per-metric provenance, bounded tool previews, and settled/open/cancelled shown as three different states |
-| WP-007 — Tauri shell | **after the M1 slice** — it packages something that already works |
+| WP-007 — Tauri shell | **done** — a window plus a Python host that owns the daemon through WP-005's supervisor; A2/A3/A5/A6 run in CI with no Rust, A1/A3 proven by `apps/desktop/smoke_shell.py` against a real window, A7 produced an AppImage (97 MiB) and a deb (1.33 MiB) here; Windows bundle **not** verified (no Windows host involved). Logic and decisions: ADR-0009, `docs/architecture/PACKAGING.md` |
 
 ## Working (verified in this checkout)
 
@@ -68,12 +68,32 @@ paper (ADR-0006) and nothing more.
 
 ## Next
 
-1. **WP-007 — Tauri shell**: package what now works (the daemon plus the built web bundle) as a
-   desktop app, on both OSes, with the same "no second source of truth" rule.
-2. **M2 — the rest of the runtime surface**: approvals (the adapter declares
-   `approval.native` unsupported with a reason), tasks, artifact inspection in the UI, and the
-   Hermes adapter via ACP over stdio (ADR-0016) so that "move Nova to Hermes" is a version bump
-   and not a rewrite.
+**M2 — Runtime Migration.** The point is not more features: it is proving that Nova survives a
+change of body. `Nova/Pi → verified Context Capsule → Nova/Hermes`, same `agt_` identity, same
+mission, the Pi session archived and a Hermes session continuing the work.
+
+Order approved by the Architect:
+
+1. **WP-007 — desktop packaging.** Done (see the table above).
+2. **M2**, in this order: agent versioning (already partly there — `agent_versions` + ADR-0002),
+   session archival, **Context Capsule v1** (the contract is frozen in
+   `packages/contracts/metaharness_contracts/capsule.py`: 16 fields, 64 KB ceiling, transcript
+   fields forbidden), a **capsule verifier** that checks every referenced id against the store,
+   the **Hermes `RuntimeAdapter` over ACP**, its conformance suite, and the migration
+   command/API/UI.
+
+   The precondition the Architect set is met: the ACP protocol was **observed**, not inferred —
+   `tools/probe_hermes_acp.py`, capture and analysis in `docs/protocols/HERMES_ACP.md`, including
+   what the handshake advertises but no call exercised. The transfer object is the verified
+   capsule; copying chat history is explicitly not the mechanism, and runtime stays out of agent
+   identity: Pi → Hermes is a new **session**, never a new agent.
+
+   Required proof, and nothing less: create Nova on Pi → do meaningful work → verified capsule →
+   archive the Pi session → switch the runtime policy → create a Hermes session → inject the
+   capsule → continue the same mission → same `agt_` id → previous session still visible → event
+   lineage intact → usage attributable per runtime/session → restart the daemon → Nova exists on
+   Hermes with the Pi session preserved as history.
+
 3. **Event-log retention** — the log has no compaction or archival policy yet.
 
 ## Important decisions
@@ -114,6 +134,17 @@ git log --oneline --decorate -6
 - **`duration_ms` is `null` in RPC mode** because Pi reports no duration there. Timing the tool
   ourselves would be our clock wearing the tool's name, so the field stays null and the UI prints
   `?` rather than a number we did not measure.
+- **The Windows desktop bundle is not verified.** The Linux bundles were built and one of them was
+  smoke-tested through a real window; on Windows the shell's Python host shares the supervisor the
+  Windows CI already exercises, but that is an argument, not evidence. No Windows host was
+  involved, so the honest statement is *not verified on Windows*.
+- **The desktop shell emits no events yet.** `system.desktop.started` and
+  `system.desktop.daemon_failed` need a daemon-side surface, and WP-007 forbids modifying
+  `apps/daemon/**`. The shell's own log (`<data root>/logs/desktop-shell.log`) is the record until
+  that package exists.
+- **There is no per-launch auth token.** The enforced property remains loopback-only; the shell
+  passes four `METAHARNESS_*` variables to the daemon and a test asserts it passes nothing else.
+  BOOK §65's Rust-side proxying waits for the daemon to have a token to proxy.
 - `StaticFiles(html=True)` does **not** provide SPA fallback: an unknown path returns 404 rather than index.html. The router arrives with WP-006 and must add the fallback.
 - Durability is absent by design: the event ring is in memory, so a restart loses events. WP-004 makes SQLite canonical (ADR-0003).
 - `doctor.py` exits 2 when only warnings remain (missing pnpm/node/web bundle), which is information, not failure; CI calls it with `--report-only` because a runner is expected to be partial.
