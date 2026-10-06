@@ -291,3 +291,20 @@ button:hover { border-color: var(--accent); }
 
 .modal .facts strong { color: var(--foreground); }
 .modal button.ghost { background: transparent; border-color: var(--border); color: var(--muted-foreground); }
+
+/* --------------------------------------------------------------- enforcement badges */
+
+.badge {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.badge-strong { color: #7fd1a6; border-color: #2f6b4f; }
+.badge-moderate { color: #e0c168; border-color: #7a6425; }
+.badge-weak { color: #e08b7a; border-color: #7a3f34; }
+.badge-unknown { color: var(--muted-foreground); }

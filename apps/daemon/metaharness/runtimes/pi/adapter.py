@@ -290,13 +290,22 @@ class PiRuntimeAdapter:
             argv += ["--no-tools"]
         return argv
 
-    async def create_session(self, spec: SessionSpec) -> RuntimeSession:
+    async def create_session(
+        self, spec: SessionSpec, environment: Any | None = None
+    ) -> RuntimeSession:
         session_id = new_id(IdKind.SESSION)
         session_dir = self._session_dir(session_id)
+        argv = self._session_argv(spec, session_dir)
+        cwd = spec.workspace or self.cwd
+        env = self.env
+        if environment is not None:
+            argv = environment.wrap(argv)
+            cwd = environment.plan.cwd
+            env = {**(self.env or {}), **environment.plan.env}
         transport = PiTransport(
-            self._session_argv(spec, session_dir),
-            cwd=spec.workspace or self.cwd,
-            env=self.env,
+            argv,
+            cwd=cwd,
+            env=env,
             supervisor=self.supervisor,
             response_timeout_s=self.response_timeout_s,
             on_protocol_error=lambda error: self.protocol_errors.append(str(error)),
@@ -343,6 +352,7 @@ class PiRuntimeAdapter:
                 "pi_session_id": session.pi_session_id,
                 "session_dir": str(session_dir),
                 "tools": list(spec.allowed_tools),
+                "execution": environment.as_dict() if environment is not None else None,
             },
             session_id=session_id,
             agent_id=spec.agent_id,
@@ -359,6 +369,15 @@ class PiRuntimeAdapter:
                 "model": session.model or spec.model,
                 "pi_session_id": session.pi_session_id,
                 "session_dir": str(session_dir),
+                **(
+                    {
+                        "isolation": environment.evidence.isolation.value,
+                        "sandbox_provider": environment.plan.provider,
+                        "filesystem_mode": environment.plan.filesystem_mode,
+                    }
+                    if environment is not None
+                    else {}
+                ),
             },
         )
 

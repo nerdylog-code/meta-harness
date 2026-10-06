@@ -41,6 +41,7 @@ from . import paths
 from .api import agents_router
 from .events import EventBus
 from .reconcile import BootReconciler, PidProbe
+from .sandbox import ExecutionEnvironment
 from .runtimes.hermes.adapter import HermesRuntimeAdapter
 from .runtimes.pi.adapter import PiRuntimeAdapter
 from .store import Store, default_db_path
@@ -64,6 +65,10 @@ class Settings:
     pi_argv: list[str] | None = None
     #: Argv for the Hermes runtime. ``None`` means the real ``hermes acp`` (ADR-0016).
     hermes_argv: list[str] | None = None
+    #: Which sandbox provider to prefer: ``auto`` picks the strongest usable one (ADR-0019).
+    sandbox: str = "auto"
+    #: The container runtime to look for when ``auto`` reaches the container rung.
+    container_runtime: str = "docker"
 
     def resolved_data_dir(self) -> Path:
         return paths.data_root(self.data_dir)
@@ -125,6 +130,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             bus.publish_transient(event)
         else:
             bus.publish_event(event)
+        # The budgets observe real events, not intentions (M3). A tool-call limit is counted here,
+        # from the events the runtime actually produced, and a usage sample is what feeds the token
+        # and cost budgets -- both of which are recorded as soft, because they arrive after the fact.
+        trackers = getattr(app.state, "budget_trackers", None)
+        if trackers and getattr(event, "session_id", None):
+            tracker = trackers.get(event.session_id)
+            if tracker is not None:
+                kind = getattr(event, "kind", "")
+                if kind == "tool.started":
+                    tracker.observe_tool_call()
+                elif kind == "usage.sampled":
+                    sample = (getattr(event, "payload_body", None) or {}).get("sample")
+                    if isinstance(sample, dict):
+                        try:
+                            from metaharness_contracts import UsageSample
+
+                            tracker.observe_usage(UsageSample(**sample))
+                        except Exception:
+                            pass
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -142,10 +166,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # One adapter per runtime, resolved by id. `state.adapter` stays as the default so
         # nothing that predates the second runtime has to change.
         hermes = HermesRuntimeAdapter(argv=settings.hermes_argv, on_event=_on_adapter_event)
+        # The execution boundary (M3). One environment per daemon; each session asks it for a plan.
+        environment = ExecutionEnvironment(
+            prefer=settings.sandbox,
+            container=settings.container_runtime,
+            data_root=str(paths.ensure_layout(settings.data_dir)),
+        )
         app.state.store = store
         app.state.bus = bus
         app.state.adapter = adapter
         app.state.adapters = {adapter.runtime_id: adapter, hermes.runtime_id: hermes}
+        app.state.environment = environment
+        #: Live budget trackers, one per session. Owned by the daemon, never by the runtime.
+        app.state.budget_trackers = {}
         # Reconcile before announcing the daemon, so the first thing a client reads is an
         # honest picture (BOOK §83).
         reconcile = BootReconciler(store, PidProbe()).run()

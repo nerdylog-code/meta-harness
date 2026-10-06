@@ -29,6 +29,7 @@ import {
 } from "../api";
 import { EmptyState, Failure, KeyValues, Loading, Panel } from "../components/Panel";
 import { RuntimeMigrationPanel } from "../components/RuntimeMigration";
+import { ExecutionBoundaryPanel } from "../components/ExecutionBoundary";
 import { useStream } from "../stream";
 
 //: Pi's own built-in tool names (from `pi --help`: "read, bash, edit, write tools"). Using a
@@ -241,6 +242,8 @@ export function AgentPage({ agentId }: { agentId: string }) {
           ]}
         />
       </Panel>
+
+      <ExecutionBoundaryPanel sessionId={sessionId} />
 
       <RuntimeMigrationPanel agent={agent} />
 

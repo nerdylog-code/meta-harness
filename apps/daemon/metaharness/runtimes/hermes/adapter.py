@@ -137,6 +137,9 @@ class HermesRuntimeAdapter:
         self.response_timeout_s = response_timeout_s
         self.probe_timeout_s = probe_timeout_s
         self.sessions: dict[str, _Session] = {}
+        #: The execution environment of the session currently being created (M3). The adapter only
+        #: forwards it; it never inspects the sandbox.
+        self.environment: Any | None = None
         self.protocol_errors: list[str] = []
         self.advertised_commands: list[str] = []
         #: The handshake's own account of itself, kept verbatim so `probe()` can report it.
@@ -144,11 +147,19 @@ class HermesRuntimeAdapter:
 
     # ------------------------------------------------------------------ discovery
 
-    async def _open(self) -> AcpTransport:
+    async def _open(self, environment: Any | None = None) -> AcpTransport:
+        """The environment wraps the argv; the adapter never learns what wrapped it."""
+        argv = list(self.argv)
+        cwd = self.cwd
+        env = self.env
+        if environment is not None:
+            argv = environment.wrap(argv)
+            cwd = environment.plan.cwd
+            env = {**(self.env or {}), **environment.plan.env}
         transport = AcpTransport(
-            self.argv,
-            cwd=self.cwd,
-            env=self.env,
+            argv,
+            cwd=cwd,
+            env=env,
             supervisor=self.supervisor,
             response_timeout_s=self.response_timeout_s,
             on_protocol_error=lambda error: self.protocol_errors.append(str(error)),
@@ -257,9 +268,12 @@ class HermesRuntimeAdapter:
 
     # ------------------------------------------------------------------- sessions
 
-    async def create_session(self, spec: SessionSpec) -> RuntimeSession:
+    async def create_session(
+        self, spec: SessionSpec, environment: Any | None = None
+    ) -> RuntimeSession:
         session_id = new_id(IdKind.SESSION)
-        transport = await self._open()
+        self.environment = environment
+        transport = await self._open(environment)
         await self._initialize(transport)
         try:
             created = await transport.request(
@@ -327,6 +341,7 @@ class HermesRuntimeAdapter:
                 # The honest bit: ACP has no tool allowlist, so the request was NOT enforced.
                 "tools_enforced": False,
                 "tools_note": "ACP exposes permission modes, not a tool allowlist; the requested list is a record, not a restriction",
+                "execution": environment.as_dict() if environment is not None else None,
             },
             session_id=session_id,
             agent_id=spec.agent_id,
@@ -334,17 +349,22 @@ class HermesRuntimeAdapter:
             task_id=spec.metadata.get("task_id"),
             run_id=spec.metadata.get("run_id"),
         )
+        detail: dict[str, Any] = {
+            "provider": session.provider,
+            "model": session.model,
+            "acp_session_id": session.acp_session_id,
+            "modes": session.modes,
+            "tools_enforced": False,
+        }
+        if environment is not None:
+            detail["isolation"] = environment.evidence.isolation.value
+            detail["sandbox_provider"] = environment.plan.provider
+            detail["filesystem_mode"] = environment.plan.filesystem_mode
         return RuntimeSession(
             session_id=session_id,
             runtime_id=self.runtime_id,
             created_at=session.created_at,
-            detail={
-                "provider": session.provider,
-                "model": session.model,
-                "acp_session_id": session.acp_session_id,
-                "modes": session.modes,
-                "tools_enforced": False,
-            },
+            detail=detail,
         )
 
     def _require(self, session_id: str) -> _Session:

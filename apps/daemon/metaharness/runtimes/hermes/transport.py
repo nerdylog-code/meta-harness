@@ -207,7 +207,11 @@ class AcpTransport:
             except (asyncio.CancelledError, Exception):
                 return
             if not raw:
-                self._fail_pending("the agent closed its stdout")
+                # An agent that dies says why somewhere, and it is almost always stderr. Reporting
+                # only "closed its stdout" turns a diagnosable failure (a missing script, a sandbox
+                # that refused the mount) into a mystery.
+                detail = self._death_detail()
+                self._fail_pending(f"the agent closed its stdout{detail}")
                 try:
                     self._notifications.put_nowait(None)
                 except asyncio.QueueFull:
@@ -235,6 +239,23 @@ class AcpTransport:
                 self._protocol_error(f"line is not a JSON object: {text[:200]!r}")
                 continue
             self._dispatch(frame)
+
+    def _death_detail(self) -> str:
+        """Exit code and the tail of stderr, when the supervisor has them."""
+        if self.handle is None:
+            return ""
+        parts: list[str] = []
+        process = self.handle.process
+        code = getattr(process, "returncode", None)
+        if code is not None:
+            parts.append(f" (exit {code})")
+        try:
+            captured = (self.supervisor.capture(self.handle, "stderr") or "").strip()
+        except Exception:  # pragma: no cover - stream already gone
+            captured = ""
+        if captured:
+            parts.append(": " + captured.splitlines()[-1][:300])
+        return "".join(parts)
 
     def _dispatch(self, frame: dict[str, Any]) -> None:
         if "id" in frame and "method" not in frame:

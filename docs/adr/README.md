@@ -21,6 +21,8 @@ Numbering policy: **numbers reserved by PROJECT_BOOK §Appendix A are kept for t
 | 0015 | Self-improvement requires staging/eval | reserved (BOOK A#15) | — |
 | 0016 | Hermes transport: ACP over stdio primary; TUI gateway JSON-RPC as declared alternative | **accepted** 2026-10-05 | `ADR-0016-hermes-transport-acp-stdio.md` |
 | 0017 | Event envelope: fixed keys, versioned payloads, tolerant edges | **accepted** 2026-10-05 | `ADR-0017-event-envelope.md` |
+| 0018 | The Context Capsule is the migration transfer object | **accepted** 2026-10-06 | `ADR-0018-capsule-as-transfer-object.md` |
+| 0019 | Execution enforcement: requested/effective/evidence, per-dimension levels, budgets that say how they are enforced | **accepted** 2026-10-06 | `ADR-0019-execution-enforcement.md` |
 
 **0016 and 0017 exist because the Book's Appendix A does not name a decision for transport selection or for the envelope's payload-versioning rule.** Rather than reuse a reserved number (which would recreate the ambiguity C7 was about), the next free numbers are used.
 
@@ -34,6 +36,7 @@ Numbering policy: **numbers reserved by PROJECT_BOOK §Appendix A are kept for t
 | Dashboard tab retired (`tab.hidden`), REST door kept | `V1_INVENTORY.md` D3 disposition |
 | Desktop shell = a window plus a Python host; the renderer is granted no capability and receives no secret | `ADR-0009` (WP-007) + `docs/architecture/PACKAGING.md` |
 | The Context Capsule is the migration transfer object; the text handed to the runtime is derived from it | `ADR-0018` (M2) + `docs/protocols/HERMES_ACP.md` |
+| A worktree or a scratch directory is never called a sandbox; a session with no sandbox records `weak` | `ADR-0019` (M3) |
 
 ## Open architectural questions (real blockers, not preferences)
 

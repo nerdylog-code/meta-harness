@@ -20,6 +20,8 @@ from off-host (the loopback guard is the enforced property until the per-launch 
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 import time
 from typing import Any
 
@@ -32,7 +34,11 @@ from metaharness.capsule import (
     capsule_bytes,
     verify_capsule,
 )
+from metaharness.budget import BudgetTracker
+from metaharness.sandbox import ExecutionEnvironment
+from metaharness.sandbox.provider import SANDBOX_HOME
 from metaharness_contracts.capsule import CapsulePhase, ContextCapsule
+from metaharness_contracts import RequestedPolicy
 from metaharness_contracts import IdKind, Message, SessionSpec, new_id
 
 router = APIRouter()
@@ -52,6 +58,9 @@ class AgentIn(BaseModel):
 
 
 class SessionIn(BaseModel):
+    #: The execution policy for this session (M3). Absent means no sandbox was requested
+    #: and no budgets apply -- and the record says `weak` rather than implying protection.
+    policy: RequestedPolicy | None = None
     workspace: str | None = None  # where the session runs; a migration can continue in the same one
     runtime_id: str | None = None  # which runtime serves it; default is the configured one
     agent_id: str
@@ -198,8 +207,33 @@ async def create_session(payload: SessionIn, request: Request) -> dict[str, Any]
             "task_id": payload.task_id,
         },
     )
+    # The execution boundary is prepared before the session exists: a boundary asserted after the
+    # fact is not one (ADR-0019). No policy means no sandbox requested, and the record says weak.
+    environment_engine: ExecutionEnvironment | None = getattr(request.app.state, "environment", None)
+    plan = None
+    requested = payload.policy or RequestedPolicy(workspace=payload.workspace)
+    if environment_engine is not None and (payload.policy is not None or payload.workspace):
+        try:
+            staged_files, staged_env, staged_mirrors, credentials = staged_runtime_config(
+                adapter.runtime_id, request.app.state.data_root
+            )
+            staged_env = {**staged_env, **credentials}
+            plan = environment_engine.prepare(
+                workspace=spec.workspace or str(request.app.state.data_root / "workspaces" / run_id),
+                requested=requested,
+                runtime_binary=(adapter.argv[0] if getattr(adapter, "argv", None) else None),
+                staged_config=staged_files,
+                staged_env=staged_env,
+                staged_mirrors=staged_mirrors,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=409, detail=f"the execution boundary could not be prepared: {exc}"
+            ) from exc
+        if spec.workspace is None:
+            spec = spec.model_copy(update={"workspace": plan.plan.cwd})
     try:
-        session = await adapter.create_session(spec)
+        session = await adapter.create_session(spec, environment=plan)
     except Exception as exc:  # a runtime that cannot start is reported, never hidden
         bus.publish(
             "runtime.unreachable",
@@ -232,12 +266,46 @@ async def create_session(payload: SessionIn, request: Request) -> dict[str, Any]
         session_id=session.session_id,
         runtime_id=adapter.runtime_id,
     )
+    if plan is not None:
+        bus.publish(
+            "session.policy",
+            {
+                "session_id": session.session_id,
+                "requested": requested.model_dump(mode="json"),
+                "effective": plan.effective.model_dump(mode="json"),
+                "evidence": plan.evidence.model_dump(mode="json"),
+                "sandbox": plan.choice.as_dict(),
+                "isolation": plan.evidence.isolation.value,
+                # Names only. What a session was granted is auditable; the values never enter the log.
+                "credential_env": sorted(credentials),
+            },
+            method="measured",
+            session_id=session.session_id,
+            agent_id=payload.agent_id,
+            mission_id=payload.mission_id,
+            run_id=run_id,
+            runtime_id=adapter.runtime_id,
+        )
+        tracker = BudgetTracker(
+            session_id=session.session_id,
+            requested=requested,
+            cancel=lambda: adapter.cancel(session.session_id),
+            publish=bus.publish,
+            pid=pid,
+            environment=plan,
+        )
+        await tracker.start()
+        trackers = getattr(request.app.state, "budget_trackers", None)
+        if trackers is not None:
+            trackers[session.session_id] = tracker
+
     return {
         "session_id": session.session_id,
         "run_id": run_id,
         "runtime_id": session.runtime_id,
         "detail": session.detail,
         "pid": pid,
+        "policy": plan.as_dict() if plan is not None else None,
     }
 
 
@@ -1014,4 +1082,111 @@ def get_migration(migration_id: str, request: Request) -> dict[str, Any]:
             {"seq": event.seq, "kind": event.kind, "ts": event.ts, "payload": event.payload_body}
             for event in events
         ],
+    }
+
+
+def credential_env(runtime_id: str) -> dict[str, str]:
+    """The credentials the runtime says it needs, taken from the environment.
+
+    A runtime records where each credential comes from -- hermes keeps `env:OPENCODE_GO_API_KEY` in
+    its credential pool -- so the sandbox passes exactly those variables and nothing else. Passing
+    the daemon's whole environment would hand the agent every token the daemon holds; passing none
+    makes the provider "unavailable" inside a boundary that is working correctly, which is how this
+    was found. Only names are ever recorded.
+    """
+    if runtime_id != "rt_hermes":
+        return {}
+    try:
+        auth = json.loads((Path.home() / ".hermes" / "auth.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    wanted: dict[str, str] = {}
+    pool = auth.get("credential_pool")
+    if isinstance(pool, dict):
+        for entries in pool.values():
+            for entry in entries if isinstance(entries, list) else []:
+                source = str(entry.get("source") or "") if isinstance(entry, dict) else ""
+                if source.startswith("env:"):
+                    name = source[4:].strip()
+                    value = os.environ.get(name)
+                    if name and value:
+                        wanted[name] = value
+    return wanted
+
+
+def staged_runtime_config(
+    runtime_id: str, data_root: Path
+) -> tuple[list[tuple[str, str]], dict[str, str], list[tuple[str, str]], dict[str, str]]:
+    """The minimum config a runtime needs inside its sandbox, staged into its own HOME.
+
+    The sandbox's HOME is never the real one: only these files are copied, so an agent cannot walk
+    `$HOME` to reach the user's other data -- and the runtime can still authenticate.
+    """
+    home = Path.home()
+    mirrors: list[tuple[str, str]] = []
+    if runtime_id == "rt_hermes":
+        candidates = (
+            (home / ".hermes" / "auth.json", ".hermes/auth.json"),
+            (home / ".hermes" / "config.yaml", ".hermes/config.yaml"),
+            (home / ".hermes" / "config.yml", ".hermes/config.yml"),
+            # The runtime's own credentials file: hermes loads it from its data root, so a staged
+            # copy is how the sandboxed runtime authenticates. Staged as 0600 and never the real one.
+            (home / ".hermes" / ".env", ".hermes/.env"),
+        )
+        # The install state, not the user's data: `hermes` refuses to boot without the record of its
+        # committed dependency environment, and it insists that the environment it names live inside
+        # the data root. So the record is staged with its paths rewritten to this session's root,
+        # and the real environment tree is mirrored read-only at the path the rewritten record names.
+        for facts in sorted((home / ".hermes" / "installs").glob("*/facts.json")):
+            key = facts.parent.name
+            try:
+                rewritten = facts.read_text(encoding="utf-8").replace(str(home / ".hermes"), f"{SANDBOX_HOME}/.hermes")
+            except OSError:
+                continue
+            staged_copy = data_root / "staged-config" / f"{key}-facts.json"
+            staged_copy.parent.mkdir(parents=True, exist_ok=True)
+            staged_copy.write_text(rewritten, encoding="utf-8")
+            candidates += ((staged_copy, f".hermes/installs/{key}/facts.json"),)
+            mirrors += ((str(home / ".hermes" / "installs" / key / "environments"), f".hermes/installs/{key}/environments"),)
+    else:
+        candidates = (
+            (home / ".pi" / "auth.json", ".pi/auth.json"),
+            (home / ".config" / "pi" / "config.json", ".config/pi/config.json"),
+        )
+    files = [(str(source), relative) for source, relative in candidates if source.exists()]
+    # `hermes` resolves its root from HERMES_HOME, which by default is the user's real `~/.hermes`.
+    # Pointing it at the staged copy keeps the runtime working while the real one stays unmounted.
+    env = {"HERMES_HOME": ".hermes"} if runtime_id == "rt_hermes" else {}
+    return files, env, mirrors, credential_env(runtime_id)
+
+
+@router.get("/v1/sandbox")
+def sandbox_providers(request: Request) -> dict[str, Any]:
+    """Every sandbox provider and its verdict, so the UI can show *why* a session is weak."""
+    engine: ExecutionEnvironment | None = getattr(request.app.state, "environment", None)
+    if engine is None:
+        return {"providers": [], "prefer": None}
+    return {"providers": engine.providers(), "prefer": engine.prefer}
+
+
+@router.get("/v1/sessions/{session_id}/policy")
+def session_policy(session_id: str, request: Request) -> dict[str, Any]:
+    """The requested policy, the effective one, the evidence, and the budgets as they stand now."""
+    store = _store(request)
+    events = store.events(kind="session.policy", session_id=session_id)
+    if not events:
+        raise HTTPException(status_code=404, detail=f"no policy recorded for session {session_id}")
+    payload = events[-1].payload_body
+    tracker = (getattr(request.app.state, "budget_trackers", None) or {}).get(session_id)
+    live = [record.model_dump(mode="json") for record in tracker.records()] if tracker else None
+    return {
+        "session_id": session_id,
+        "requested": payload.get("requested"),
+        "effective": payload.get("effective"),
+        "evidence": payload.get("evidence"),
+        "sandbox": payload.get("sandbox"),
+        "isolation": payload.get("isolation"),
+        "budgets": live or (payload.get("effective") or {}).get("budgets"),
+        "exceeded": tracker.exceeded if tracker else {},
+        "live": tracker is not None,
     }

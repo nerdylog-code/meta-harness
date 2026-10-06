@@ -195,7 +195,16 @@ class RuntimeAdapter(Protocol):
 
     async def models(self) -> list[ModelInfo]: ...
 
-    async def create_session(self, spec: SessionSpec) -> RuntimeSession: ...
+    async def create_session(
+        self, spec: SessionSpec, environment: Any | None = None
+    ) -> RuntimeSession:
+        """`environment` is an `ExecutionEnvironment` plan (M3, ADR-0019).
+
+        The adapter asks the environment for how to run -- argv prefix, working directory, HOME --
+        and never learns what a container or a mount namespace is. Optional on purpose: an adapter
+        with no environment behaves exactly as it did before M3.
+        """
+        ...
 
     async def send(self, session_id: str, message: Message) -> None: ...
 

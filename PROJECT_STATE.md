@@ -19,6 +19,18 @@ process, and a daemon restart after which Nova, the mission, the session history
 are still there. `scripts/e2e_m1.py` is that proof, run by hand because it needs the binary, a
 provider and real credit.
 
+**M3 — Execution Boundary — is implemented and proven against the real runtime on Linux.** The
+`RequestedPolicy`/`EffectivePolicy`/`EnforcementEvidence` split (ADR-0019), the five canonical
+budgets, and the `RuntimeAdapter → ExecutionEnvironment → SandboxProvider → ProcessSupervisor`
+chain exist, and the first strong proof is Hermes: a real `hermes acp` session runs inside a
+bubblewrap namespace where the repository, the real HOME and a host-only canary file are all
+unreachable, and it still authenticates and serves a real model. The budgets fire on real events:
+`wall_time` is `strong` (the supervisor kills the tree and reports survivors), `tool_calls` is
+`moderate` (counted from real `tool.started` events, stopped best-effort), `tokens`/`cost` are
+`weak` (the provider reports after the turn, so the record says so). `scripts/e2e_m3.py` is the
+before/after proof: the same escape prompt that found the host repository in M2 reads a canary
+token with no sandbox and cannot reach it with a strong one.
+
 **M2 — Runtime Migration — is complete and proven with the real runtimes.** `scripts/e2e_m2.py`
 exits 0: Nova runs on real Pi (`opencode-go` / `kimi-k3`), reads a real file with a real tool call,
 hands over a **verified Context Capsule**, the Pi session is archived with its process released,
@@ -93,9 +105,18 @@ paper (ADR-0006) and nothing more.
 
 ## Next
 
-**M2 — Runtime Migration.** The point is not more features: it is proving that Nova survives a
-change of body. `Nova/Pi → verified Context Capsule → Nova/Hermes`, same `agt_` identity, same
-mission, the Pi session archived and a Hermes session continuing the work.
+**M3 — Execution Boundary** (the current one; M2 is below for reference). The point is that the
+control plane can **refuse**, not only ask: an agent may stay autonomous but may not leave the
+space, time and budget it was granted. Done: ADR-0019, the policy records, the budgets with honest
+enforcement levels, the three sandbox providers, the boundary test suite, and the real Hermes
+session inside a strong sandbox. Next in the sequence, in this order: **Tasks / Work Graph →
+Approvals → Artifact inspection → Worktree allocator → richer Canvas/Workboard → Fusion/Swarm.**
+Swarm does not come before enforcement: an agent with no boundary already started another E2E by
+itself, and multiplying that before the cage exists would be an architectural error.
+
+**M2 — Runtime Migration** (done). The point was proving that Nova survives a change of body.
+`Nova/Pi → verified Context Capsule → Nova/Hermes`, same `agt_` identity, same mission, the Pi
+session archived and a Hermes session continuing the work.
 
 Order approved by the Architect:
 
@@ -142,6 +163,21 @@ git log --oneline --decorate -6
 ## Honest limitations
 
 - The v2 suites run locally on Python 3.12; the v1 suite also passes under the Hermes venv interpreter (3.13). A bare 3.14 without PyYAML fails the v1 suite, which `scripts/test.py` now diagnoses with the interpreter path and the exact command to use.
+- **The strong sandbox is verified on Linux only.** The boundary tests use bubblewrap; on Windows
+  CI they skip with the exact reason (`strong sandbox real not verified here`), while the contracts,
+  the policy engine, the budget engine and the lifecycle stay green there. The container provider
+  reports `unavailable` with the reason when no daemon is reachable (`the daemon is not reachable at
+  /var/run/docker.sock`) — it is not silently skipped.
+- **A sandboxed runtime's credential is passed in its environment**, which puts it in the sandbox's
+  argv: visible to the same user's processes. On a single-user desktop that is the same trust
+  domain, and the runtime's own credentials file (`~/.hermes/.env`, staged 0600) is the mechanism
+  used where the runtime supports it. Only credential *names* are recorded (`session.policy` →
+  `credential_env`); values never enter the event log.
+- **A runtime's installation is mounted read-only and its data root is a per-session copy.** Getting
+  `hermes` to boot there needed its install state (`installs/<key>/facts.json`, staged with paths
+  rewritten) and a writable tmpfs over its dependency environment, because it writes a lease into
+  it. These are derived from the launcher and the state files, not hardcoded — but they are
+  Hermes-specific facts and will need the same treatment for each new runtime.
 - **The web page's DOM was exercised in headless Chromium for the WP-006 shell.** The agent
   page (WP-019) was verified over HTTP and by its own integration tests, not yet in a browser.
 - **The real provider call is verified on Linux only.** On Windows the CI matrix runs the

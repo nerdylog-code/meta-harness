@@ -300,6 +300,55 @@ export const migrateAgent = (agentId: string, toRuntime: string, model: string |
     tools: ["read"],
   });
 
+export interface BudgetRecordRow {
+  kind: string;
+  requested: number | null;
+  observed: number | null;
+  enforcement_mode: string;
+  enforcement: string;
+  limit_reached: boolean;
+  action: string | null;
+  provenance: string;
+  note: string | null;
+}
+
+export interface PolicyEvidence {
+  provider: string | null;
+  filesystem: string;
+  network: string;
+  wall_time: string;
+  tool_calls: string;
+  tokens: string;
+  cost: string;
+  child_processes: string;
+  isolation?: string;
+  checks: Array<{ name: string; ok: boolean; detail: string | null }>;
+  note: string | null;
+  as_badges?: Record<string, string>;
+}
+
+export interface SessionPolicy {
+  session_id: string;
+  requested: Record<string, unknown> | null;
+  effective: { workspace?: string; filesystem_mode?: string; sandbox_provider?: string | null; budgets?: BudgetRecordRow[] } | null;
+  evidence: PolicyEvidence | null;
+  sandbox: Record<string, unknown> | null;
+  isolation: string | null;
+  budgets: BudgetRecordRow[] | null;
+  exceeded: Record<string, unknown>;
+  live: boolean;
+}
+
+export interface SandboxProviders {
+  providers: Array<{ provider: string; available: boolean; detail: string }>;
+  prefer: string | null;
+}
+
+export const fetchSessionPolicy = (sessionId: string) =>
+  getJson<SessionPolicy>(`/v1/sessions/${encodeURIComponent(sessionId)}/policy`);
+
+export const fetchSandboxProviders = () => getJson<SandboxProviders>("/v1/sandbox");
+
 export const cancelSession = (sessionId: string) =>
   postJson<{ cancelled: boolean; orphans_left: boolean | null }>(
     `/v1/sessions/${encodeURIComponent(sessionId)}/cancel`,
