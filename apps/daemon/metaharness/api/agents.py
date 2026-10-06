@@ -1147,7 +1147,18 @@ def staged_runtime_config(
             staged_copy.parent.mkdir(parents=True, exist_ok=True)
             staged_copy.write_text(rewritten, encoding="utf-8")
             candidates += ((staged_copy, f".hermes/installs/{key}/facts.json"),)
-            mirrors += ((str(home / ".hermes" / "installs" / key / "environments"), f".hermes/installs/{key}/environments"),)
+            # Mirror the one generation the record names, not the whole `environments` directory:
+            # binding every generation read-only also bound the live one's `.leases`, and the runtime
+            # writes its lease there. Its parent is the fallback when the record names nothing.
+            environment_dir = Path(f".hermes/installs/{key}/environments")
+            try:
+                recorded = str(json.loads(facts.read_text(encoding="utf-8")).get("packages", {}).get("venv", {}).get("environment") or "")
+            except (OSError, ValueError):
+                recorded = ""
+            if recorded.startswith(str(home / ".hermes")):
+                environment_dir = Path(recorded).relative_to(home / ".hermes").parent
+            # Inside the sandbox the staged home *is* HOME, so the path keeps its `.hermes` prefix.
+            mirrors += ((str(home / ".hermes" / environment_dir), f".hermes/{environment_dir}"),)
     else:
         candidates = (
             (home / ".pi" / "auth.json", ".pi/auth.json"),

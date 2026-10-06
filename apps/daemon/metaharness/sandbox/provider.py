@@ -223,6 +223,12 @@ class NamespaceSandboxProvider:
                     target = f"{SANDBOX_HOME}/{relative}"
                     argv += ["--tmpfs", target]
                     for entry in sorted(source_path.iterdir()):
+                        if entry.name == ".leases":
+                            # The runtime's own lease bookkeeping, and the one thing it must be able
+                            # to write here. Mounting the host's copy read-only made hermes fail with
+                            # EROFS the first time an unsandboxed session had created one. The tmpfs
+                            # gives it a fresh, writable place that dies with the session.
+                            continue
                         argv += ["--ro-bind", str(entry.resolve()), f"{target}/{entry.name}"]
             env["HOME"] = SANDBOX_HOME
             env["XDG_CONFIG_HOME"] = f"{SANDBOX_HOME}/.config"
@@ -361,6 +367,8 @@ class ContainerSandboxProvider:
                     target = f"/home/sandbox/{relative}"
                     argv += ["--tmpfs", target]
                     for entry in sorted(source_path.iterdir()):
+                        if entry.name == ".leases":
+                            continue
                         argv += ["--mount", f"type=bind,src={entry.resolve()},dst={target}/{entry.name},readonly"]
             env["HOME"] = "/home/sandbox"
         for key, value in env.items():
