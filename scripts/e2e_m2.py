@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -33,6 +34,15 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 PORT = int(os.environ.get("MH_E2E_PORT", "8797"))
 ROOT = Path(tempfile.mkdtemp(prefix="mh-m2-e2e-"))
+# A scratch workspace for both legs, holding only the file the work reads. The first real run of
+# this script had the migrated agent find scripts/e2e_m2.py in its working directory and RUN IT --
+# a second full end-to-end, on real providers, spawned by the agent under test. That is the
+# migration working (the capsule carried operational intent, not just data) and it is also a cost
+# boundary that does not exist yet: ACP offers no tool allowlist, so `tools_enforced` is false and
+# an agent may run anything. A scratch workspace keeps this proof repeatable. It is not a security
+# boundary, and the script does not pretend it is one.
+WORKSPACE = Path(tempfile.mkdtemp(prefix="mh-m2-workspace-"))
+shutil.copy2(REPO / "pyproject.toml", WORKSPACE / "pyproject.toml")
 BASE = f"http://127.0.0.1:{PORT}"
 ENV = {
     **os.environ,
@@ -42,6 +52,41 @@ ENV = {
 }
 FAILURES: list[str] = []
 NOTES: list[str] = []
+#: One run at a time. The first real migration had the *destination agent* find this script and run
+#: it, so a second full end-to-end (real providers, real tokens) started by itself. A lock turns
+#: that from an open-ended recursion into a refusal with a reason.
+LOCK = Path(tempfile.gettempdir()) / "mh-e2e-m2.lock"
+
+
+def take_lock() -> bool:
+    if LOCK.exists():
+        try:
+            holder = int(LOCK.read_text().strip() or "0")
+        except ValueError:
+            holder = 0
+        if holder and _alive(holder):
+            print(f"  [FAIL] another e2e_m2 run is already going (pid {holder}); refusing to spend")
+            print("         a second round of provider credit on the same proof.")
+            return False
+    LOCK.write_text(str(os.getpid()))
+    return True
+
+
+def _alive(pid: int) -> bool:
+    try:
+        import psutil
+
+        return psutil.pid_exists(pid)
+    except Exception:
+        return False
+
+
+def release_lock() -> None:
+    try:
+        if LOCK.exists() and LOCK.read_text().strip() == str(os.getpid()):
+            LOCK.unlink()
+    except OSError:  # pragma: no cover
+        pass
 
 
 def check(label: str, ok: bool, detail: str = "") -> bool:
@@ -157,6 +202,8 @@ def assistant_text(events: list[dict]) -> str:
 
 
 def main() -> int:
+    if not take_lock():
+        return 2
     print(f"data root: {ROOT}")
     print(f"port: {PORT}")
     before = runtime_processes()
@@ -181,7 +228,12 @@ def main() -> int:
 
         pi_session = post(
             "/v1/sessions",
-            {"agent_id": agent_id, "mission_id": mission["mission_id"], "tools": ["read"]},
+            {
+                "agent_id": agent_id,
+                "mission_id": mission["mission_id"],
+                "tools": ["read"],
+                "workspace": str(WORKSPACE),
+            },
         )
         check("session on rt_pi", pi_session["runtime_id"] == "rt_pi", f"{pi_session['session_id']} pid={pi_session['pid']}")
         note(f"pi provider/model: {pi_session['detail'].get('provider')} / {pi_session['detail'].get('model')}")
@@ -225,6 +277,7 @@ def main() -> int:
             {
                 "to_runtime": "rt_hermes",
                 "tools": ["read"],
+                "workspace": str(WORKSPACE),
                 "mission_id": mission["mission_id"],
                 "capsule_id": capsule["capsule_id"],
                 "reason": "M2 proof: same Nova, different body",
@@ -268,7 +321,7 @@ def main() -> int:
 
         # ------------------------------------------- Hermes continues the same mission
         hermes_session = migration["to_session"]
-        print("  … waiting for the real hermes turn that consumed the capsule (up to 420s)")
+        print("  … waiting for the real hermes turn that consumed the capsule (up to 900s)")
         hermes_events = wait_settled(hermes_session, ("runtime.hermes.settled", "runtime.hermes.error"), 900)
         hermes_kinds = [event["kind"] for event in hermes_events]
         error = terminal_error(hermes_events, "runtime.hermes.error")
@@ -338,6 +391,7 @@ def main() -> int:
     finally:
         stop_daemon(daemon)
 
+    release_lock()
     print("\n== verdict ==")
     if FAILURES:
         print(f"  FAILED ({len(FAILURES)}): {FAILURES}")

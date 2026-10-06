@@ -206,6 +206,18 @@ def build_capsule(
         "The raw history is archived with the previous session; this capsule is the handoff. "
         "Do not assume anything the capsule does not state."
     )
+    # The first real migration proved why this closing line is not optional. With an open-ended
+    # "continue the work", the destination agent read the capsule, escaped its workspace, found the
+    # repository, read PROJECT_STATE and this project's own logs, and started building a watcher for
+    # the end-to-end run -- 24 tool calls and a 15-minute turn, ended only by our safety timeout.
+    # That is the migration working (it carried operational intent) and it is also the wrong ask for
+    # a handoff: a migration is not a work order. Acknowledging the state is what a transfer needs,
+    # and it is what makes the transfer checkable.
+    parts.append(
+        "Acknowledge this handoff: state in a few lines what you understand of the objective and of "
+        "the paths involved, then wait for the next instruction. Do not start new work in this "
+        "session until it is asked for."
+    )
     resume_instruction = "\n".join(parts)[:resume_max_chars]
 
     # ------------------------------------------------------------- honest gaps

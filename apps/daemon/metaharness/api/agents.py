@@ -52,6 +52,7 @@ class AgentIn(BaseModel):
 
 
 class SessionIn(BaseModel):
+    workspace: str | None = None  # where the session runs; a migration can continue in the same one
     runtime_id: str | None = None  # which runtime serves it; default is the configured one
     agent_id: str
     mission_id: str | None = None
@@ -187,6 +188,7 @@ async def create_session(payload: SessionIn, request: Request) -> dict[str, Any]
     spec = SessionSpec(
         agent_id=payload.agent_id,
         runtime_id=adapter.runtime_id,
+        workspace=payload.workspace,
         model=payload.model,
         allowed_tools=list(payload.tools),
         system_prompt=payload.system_prompt,
@@ -619,6 +621,7 @@ def get_capsule(capsule_id: str, request: Request) -> dict[str, Any]:
 
 class MigrateIn(BaseModel):
     to_runtime: str
+    workspace: str | None = None  # the destination session continues where the source was
     model: str | None = None
     tools: list[str] = Field(default_factory=list)
     mission_id: str | None = None
@@ -817,6 +820,7 @@ async def migrate_agent(agent_id: str, payload: MigrateIn, request: Request) -> 
     spec = SessionSpec(
         agent_id=agent_id,
         runtime_id=payload.to_runtime,
+        workspace=payload.workspace,
         model=payload.model,
         allowed_tools=list(payload.tools),
         metadata={

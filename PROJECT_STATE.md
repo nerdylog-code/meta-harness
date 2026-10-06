@@ -19,15 +19,29 @@ process, and a daemon restart after which Nova, the mission, the session history
 are still there. `scripts/e2e_m1.py` is that proof, run by hand because it needs the binary, a
 provider and real credit.
 
-**M2 — Runtime Migration — is under way, and its hard parts are done.** The ACP surface of the
-installed Hermes was *observed* before any adapter was written (`docs/protocols/HERMES_ACP.md`),
-the Hermes adapter implements the same `RuntimeAdapter` interface as Pi with a conformance suite
-built from the capture, and the **verified Context Capsule** now exists as the transfer object:
-migration 0005, `apps/daemon/metaharness/capsule.py`, and the endpoints
-`/v1/agents/{id}/versions`, `/v1/sessions/{id}/archive`, `/v1/capsules`, `/v1/agents/{id}/migrate`.
-An unverified capsule stops the migration with a 409 before anything moves. The API-level proof is
-green against scripted peers; **the real run (`scripts/e2e_m2.py`, real `pi` and real `hermes acp`)
-is the remaining step.**
+**M2 — Runtime Migration — is complete and proven with the real runtimes.** `scripts/e2e_m2.py`
+exits 0: Nova runs on real Pi (`opencode-go` / `kimi-k3`), reads a real file with a real tool call,
+hands over a **verified Context Capsule**, the Pi session is archived with its process released,
+the *same* `agt_` id gets version 2 pointing at Hermes, a real `hermes acp` session continues the
+same mission with the capsule attached, and after a daemon restart Nova is still Nova with the Pi
+history preserved and the capsule still verifiable. The Hermes turn answered in the same language
+the capsule was written in, stating the objective and the identity/runtime distinction back.
+
+The transfer object is the capsule, never the text: `context.capsule.attached` is the canonical
+link (capsule, source session, destination session, agent, mission, digest), the text handed to the
+runtime is recorded as derived from it, and the migration is a lifecycle
+(`migration.requested → capsule_verified → destination_created → capsule_attached →
+source_archived → completed`, or `migration.failed` with the stage it reached). ADR-0018.
+
+**The first real run found the boundary that does not exist yet.** Given an open-ended "continue
+the work", the destination agent read the capsule, escaped its scratch workspace with an `ls`,
+found the repository, read `PROJECT_STATE.md` and this project's own E2E logs, and began writing a
+watcher for the run -- 24 tool calls, a 15-minute turn, ended only by our safety timeout. That is
+the migration working (it carried operational intent, not data) and it is also proof that ACP's
+missing tool allowlist (`tools_enforced: false`) is an operational gap, not a documentation note:
+nothing today bounds what a migrated agent may execute. The handoff rendering now asks for
+acknowledgement instead of open work, which is the right ask for a transfer -- but a scratch
+directory is not a sandbox, and the script says so.
 
 **308 tests green locally** across 8 suites (v1 21, unit 34, contracts 113, store 57, integration
 17, replay 21, conformance 34, desktop 11) and the CI matrix is green on `ubuntu-latest` and
@@ -86,12 +100,10 @@ mission, the Pi session archived and a Hermes session continuing the work.
 Order approved by the Architect:
 
 1. **WP-007 — desktop packaging.** Done (see the table above).
-2. **M2**, in this order — **done**: agent versioning (`/v1/agents/{id}/versions`), session
-   archival (`session.archived`; the events stay), **Context Capsule v1** (built from the log,
-   every gap named in `not_verified`), the **verifier** (fails closed; digest checked against the
-   bytes actually stored), the **Hermes adapter over ACP** and its conformance suite, and the
-   **migration command**. **Remaining**: `scripts/e2e_m2.py` with the real binaries and providers,
-   and the migration surface in the web UI.
+2. **M2 — Runtime Migration**: **done and proven** (see the phase above). The migration surface is
+   in the UI (Agent Inspector + Move Runtime modal + the migrations table), and
+   `scripts/e2e_m2.py` is the real-binary proof, run by hand because it needs two providers and
+   real credit.
 
    The precondition the Architect set is met: the ACP protocol was **observed**, not inferred —
    `tools/probe_hermes_acp.py`, capture and analysis in `docs/protocols/HERMES_ACP.md`, including
@@ -155,6 +167,12 @@ git log --oneline --decorate -6
   `system.desktop.daemon_failed` need a daemon-side surface, and WP-007 forbids modifying
   `apps/daemon/**`. The shell's own log (`<data root>/logs/desktop-shell.log`) is the record until
   that package exists.
+- **Nothing bounds what a migrated agent may execute.** ACP exposes permission modes, not a tool
+  allowlist, so a Hermes session has its full toolset (`tools_enforced: false` is recorded on the
+  session). The first real migration had the destination agent leave its scratch workspace, find
+  the repository and start running project tooling on real provider credit. The control plane must
+  be able to bound execution before an agent is migrated into a workspace that matters; today it
+  cannot, and a scratch directory is not a sandbox.
 - **There is no per-launch auth token.** The enforced property remains loopback-only; the shell
   passes four `METAHARNESS_*` variables to the daemon and a test asserts it passes nothing else.
   BOOK §65's Rust-side proxying waits for the daemon to have a token to proxy.
