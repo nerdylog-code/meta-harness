@@ -32,12 +32,13 @@ Numbering policy: **numbers reserved by PROJECT_BOOK §Appendix A are kept for t
 | Freeze `v0.1-hermes-hosted` on `3ef4a5c` byte-for-byte (no cleanup commit) | `ADR-0001` decision log + `V1_RECON_REPORT.md` §4.b |
 | Pi transport: structured RPC (`pi --mode rpc`), no ANSI scraping | `ADR-0014` (rule) + v1 ADR-0006 (prior art) — the Pi-specific adapter contract arrives with WP-003 |
 | Dashboard tab retired (`tab.hidden`), REST door kept | `V1_INVENTORY.md` D3 disposition |
+| Desktop shell = a window plus a Python host; the renderer is granted no capability and receives no secret | `ADR-0009` (WP-007) + `docs/architecture/PACKAGING.md` |
 
 ## Open architectural questions (real blockers, not preferences)
 
 | # | Question | Needs |
 |---|---|---|
-| Q3 | Whether Pi's adapter follows ACP (one client) or stays on `pi --mode rpc` | Settled when the Pi adapter is written (WP-015) — the Book's §13 prefers `--mode rpc`; ACP is measured and shared with the Hermes adapter |
+| Q3 | Whether Pi's adapter follows ACP (one client) or stays on `pi --mode rpc` | **Settled by WP-015 + WP-007 (2026-10-06).** Pi stays on `pi --mode rpc`: its adapter is implemented, conformant and proven end to end. ACP was measured directly against the installed `hermes acp` (agentInfo `hermes-agent 0.21.5`) — protocol version 1, JSON-RPC 2.0 over stdio, `session/update` notifications, provider-reported usage — recorded verbatim in `docs/protocols/HERMES_ACP.md`. ACP is the Hermes transport (ADR-0016), not the Pi one: two runtimes, two observed protocols, one adapter interface. |
 | Q4 | OMP and OpenClaw adapter transports | later phases; not blocking WP-004 |
 
 **Resolved by WP-003 (2026-10-05):** Q1 (`RuntimeAdapter` surface + `CapabilitySet` taxonomy → ADR-0006) and Q2 (canonical envelope + namespace freeze → ADR-0017).

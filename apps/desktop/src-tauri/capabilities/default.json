@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The renderer gets core window behaviour and nothing else. No shell, no filesystem, no HTTP: the UI talks to the daemon the same way the browser does, and the shell's own logic lives in the Rust host, not in the page (WP-007 A6).",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

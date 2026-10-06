@@ -1,0 +1,4 @@
+# Rust build output. The shell is built on demand (`pnpm tauri build`), never committed.
+src-tauri/target/
+src-tauri/gen/
+node_modules/
