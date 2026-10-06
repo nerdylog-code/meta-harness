@@ -12,15 +12,26 @@ machine. It is the owner's document, unedited.
 
 ## Current phase
 
-**M1 — Living Agent — is complete, and it was proven against the real runtime.** A mission, the
-agent *Nova*, a Pi session on provider `opencode-go` / model `kimi-k3`, a real `read` tool call,
-its events and its `provider_reported` usage in the canonical store, a proven cancel with no
-surviving process, and then a daemon restart after which Nova, the mission, the session history
-and every event are still there. `scripts/e2e_m1.py` is the proof, run by hand because it needs
-the binary, a provider and real credit. WP-015 → WP-020 are done; **281 tests green locally**
-(v1 21, unit 34, contracts 113, store 57, integration 17, replay 21, conformance 18) and the
-CI matrix is green on `ubuntu-latest` and `windows-latest`.
-`master` and the tag `v0.1-hermes-hosted` are untouched.
+**M1 — Living Agent — is complete and proven against the real runtime.** A mission, the agent
+*Nova*, a Pi session on provider `opencode-go` / model `kimi-k3`, a real `read` tool call, its
+events and its `provider_reported` usage in the canonical store, a proven cancel with no surviving
+process, and a daemon restart after which Nova, the mission, the session history and every event
+are still there. `scripts/e2e_m1.py` is that proof, run by hand because it needs the binary, a
+provider and real credit.
+
+**M2 — Runtime Migration — is under way, and its hard parts are done.** The ACP surface of the
+installed Hermes was *observed* before any adapter was written (`docs/protocols/HERMES_ACP.md`),
+the Hermes adapter implements the same `RuntimeAdapter` interface as Pi with a conformance suite
+built from the capture, and the **verified Context Capsule** now exists as the transfer object:
+migration 0005, `apps/daemon/metaharness/capsule.py`, and the endpoints
+`/v1/agents/{id}/versions`, `/v1/sessions/{id}/archive`, `/v1/capsules`, `/v1/agents/{id}/migrate`.
+An unverified capsule stops the migration with a 409 before anything moves. The API-level proof is
+green against scripted peers; **the real run (`scripts/e2e_m2.py`, real `pi` and real `hermes acp`)
+is the remaining step.**
+
+**308 tests green locally** across 8 suites (v1 21, unit 34, contracts 113, store 57, integration
+17, replay 21, conformance 34, desktop 11) and the CI matrix is green on `ubuntu-latest` and
+`windows-latest`. `master` and the tag `v0.1-hermes-hosted` are untouched.
 
 | WP | State |
 |---|---|
@@ -75,12 +86,12 @@ mission, the Pi session archived and a Hermes session continuing the work.
 Order approved by the Architect:
 
 1. **WP-007 — desktop packaging.** Done (see the table above).
-2. **M2**, in this order: agent versioning (already partly there — `agent_versions` + ADR-0002),
-   session archival, **Context Capsule v1** (the contract is frozen in
-   `packages/contracts/metaharness_contracts/capsule.py`: 16 fields, 64 KB ceiling, transcript
-   fields forbidden), a **capsule verifier** that checks every referenced id against the store,
-   the **Hermes `RuntimeAdapter` over ACP**, its conformance suite, and the migration
-   command/API/UI.
+2. **M2**, in this order — **done**: agent versioning (`/v1/agents/{id}/versions`), session
+   archival (`session.archived`; the events stay), **Context Capsule v1** (built from the log,
+   every gap named in `not_verified`), the **verifier** (fails closed; digest checked against the
+   bytes actually stored), the **Hermes adapter over ACP** and its conformance suite, and the
+   **migration command**. **Remaining**: `scripts/e2e_m2.py` with the real binaries and providers,
+   and the migration surface in the web UI.
 
    The precondition the Architect set is met: the ACP protocol was **observed**, not inferred —
    `tools/probe_hermes_acp.py`, capture and analysis in `docs/protocols/HERMES_ACP.md`, including
@@ -94,7 +105,9 @@ Order approved by the Architect:
    lineage intact → usage attributable per runtime/session → restart the daemon → Nova exists on
    Hermes with the Pi session preserved as history.
 
-3. **Event-log retention** — the log has no compaction or archival policy yet.
+3. **The migration UI**: the endpoints exist and are tested; the Control UI does not surface them
+   yet, so a migration is currently an API call.
+4. **Event-log retention** — the log has no compaction or archival policy yet.
 
 ## Important decisions
 
