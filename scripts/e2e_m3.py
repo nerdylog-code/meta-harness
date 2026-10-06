@@ -292,7 +292,8 @@ def _run() -> int:
         closed_evidence = closed["policy"]["evidence"]
         check("filesystem is still strong with the network closed", closed_evidence["filesystem"] == "strong")
         check("the network is now strong too", closed_evidence["network"] == "strong", str(closed_evidence["network"]))
-        check("and the isolation is no longer weak", closed_evidence["isolation"] == "strong", str(closed_evidence["isolation"]))
+        closed_view = get(f"/v1/sessions/{closed['session_id']}/policy")
+        check("and the isolation is no longer weak", closed_view["isolation"] == "strong", str(closed_view["isolation"]))
         post(f"/v1/sessions/{closed['session_id']}/messages", {"text": "Say OK."})
         closed_events, _ = wait_terminal(closed["session_id"], 180)
         failed = [event for event in closed_events if event["kind"] == "runtime.hermes.error"]
