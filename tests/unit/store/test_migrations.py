@@ -122,7 +122,11 @@ class MigrationDisciplineTest(unittest.TestCase):
 
     def test_a5_a_failing_migration_rolls_back_completely(self) -> None:
         broken = _copy_migrations(self.root / "broken")
-        (broken / "0005_sabotage.sql").write_text(
+        # Derived, never hardcoded. This test has broken twice for the same reason: it named a
+        # fixed version and the real migration directory grew into it, so the failure under test
+        # was replaced by a duplicate-version error. The next free version cannot collide.
+        sabotage = f"{max(step.version for step in discover(broken)) + 1:04d}_sabotage.sql"
+        (broken / sabotage).write_text(
             "CREATE TABLE sabotage (a TEXT);\n"
             "INSERT INTO sabotage VALUES ('ok');\n"
             "SELECT * FROM table_that_does_not_exist;\n",
@@ -133,7 +137,8 @@ class MigrationDisciplineTest(unittest.TestCase):
         with self.assertRaises(MigrationError) as caught:
             Store(path, data_root=self.root, migrations_dir=broken)
         message = str(caught.exception)
-        self.assertIn("0005_sabotage", message)
+        # The message names the migration without its extension; compare like for like.
+        self.assertIn(sabotage.removesuffix(".sql"), message)
         self.assertIn("statement 3", message)
 
         # The half-applied statement must not survive, and the version must not be recorded.

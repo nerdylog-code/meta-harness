@@ -126,10 +126,14 @@ class SessionsProjection:
     tables: tuple[str, ...] = ("sessions",)
 
     #: state <- event kind. A session that was cancelled says so; it never looks merely closed.
+    #: `runtime.hermes.cancelled` is listed for the same reason Pi's is: a cancel on the second
+    #: runtime must not leave a row that still reads "open".
     STATE_BY_KIND = {
         "session.opened": "open",
         "session.closed": "closed",
+        "session.archived": "archived",
         "runtime.pi.cancelled": "cancelled",
+        "runtime.hermes.cancelled": "cancelled",
     }
 
     def apply(self, conn: sqlite3.Connection, event: CanonicalEvent) -> bool:
@@ -140,7 +144,7 @@ class SessionsProjection:
             raise ValueError(f"{event.kind} must identify its session")
         body = event.payload_body
         state = self.STATE_BY_KIND[event.kind]
-        if event.kind == "runtime.pi.cancelled" and not body.get("orphans", True):
+        if event.kind in {"runtime.pi.cancelled", "runtime.hermes.cancelled"} and not body.get("orphans", True):
             # A cancel that left survivors is not a clean cancel, and the row must not imply it.
             state = "cancelled-with-survivors"
         reason = body.get("reason") or ("orphaned process" if state.endswith("survivors") else None)
@@ -176,6 +180,63 @@ class SessionsProjection:
                 state,
                 reason,
                 event.ts,
+                event.ts,
+                event.seq,
+            ),
+        )
+        return True
+
+
+class CapsulesProjection:
+    """Context capsules, indexed by the artifact that holds them (M2).
+
+    The row is written from `capsule.created` and nothing else. `verified` is a recorded outcome,
+    not an assumption: a capsule that failed verification still gets a row -- an attempt is a fact
+    and the log is append-only -- but the row says it failed, and the migration reads that field.
+    """
+
+    name = "capsules"
+    tables: tuple[str, ...] = ("capsules",)
+
+    def apply(self, conn: sqlite3.Connection, event: CanonicalEvent) -> bool:
+        if event.kind != "capsule.created":
+            return False
+        body = event.payload_body
+        capsule_id = event.payload_body.get("capsule_id") or body.get("id")
+        if not capsule_id:
+            raise ValueError("capsule.created must identify the artifact that holds it")
+        verification = body.get("verification")
+        conn.execute(
+            """
+            INSERT INTO capsules (
+                id, agent_id, mission_id, session_id, runtime_id, phase, objective,
+                sha256, size, verified, verification, created_ts, last_seq
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                agent_id     = COALESCE(excluded.agent_id, capsules.agent_id),
+                mission_id   = COALESCE(excluded.mission_id, capsules.mission_id),
+                session_id   = COALESCE(excluded.session_id, capsules.session_id),
+                runtime_id   = COALESCE(excluded.runtime_id, capsules.runtime_id),
+                phase        = excluded.phase,
+                objective    = excluded.objective,
+                sha256       = excluded.sha256,
+                size         = excluded.size,
+                verified     = excluded.verified,
+                verification = excluded.verification,
+                last_seq     = excluded.last_seq
+            """,
+            (
+                str(capsule_id),
+                event.agent_id or body.get("agent_id"),
+                event.mission_id or body.get("mission_id"),
+                event.session_id or body.get("session_id"),
+                event.runtime_id or body.get("runtime_id"),
+                str(body.get("phase") or "NORMAL"),
+                str(body.get("objective") or ""),
+                str(body.get("sha256") or ""),
+                int(body.get("size") or 0),
+                1 if body.get("verified") else 0,
+                json.dumps(verification, ensure_ascii=False) if verification is not None else None,
                 event.ts,
                 event.seq,
             ),
