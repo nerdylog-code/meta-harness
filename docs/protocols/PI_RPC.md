@@ -139,3 +139,45 @@ Anything the probe cannot confirm is reported as `UnsupportedCapability`, never 
   `--session-dir` under our data root so a run can be resumed and audited.
 - **No killing without verification.** Cancellation goes through `ProcessSupervisor`, whose
   `orphan_check` is the proof (BOOK §79).
+
+
+## Tool calls
+
+Captured from the real binary (`pi --mode rpc --tools read`, a prompt that reads a file). The
+tool lifecycle in RPC mode is **not** spelled the same way as in `--mode json`:
+
+| `--mode json`   | `--mode rpc`             | canonical event  |
+| --------------- | ------------------------ | ---------------- |
+| `tool_start`    | `tool_execution_start`   | `tool.started`   |
+| `tool_end`      | `tool_execution_end`     | `tool.completed` |
+| `tool_call`     | —                        | `tool.started`   |
+| `tool_result`   | —                        | `tool.completed` |
+
+The parser accepts both spellings; the fake peer used by the conformance suite emits the RPC
+ones, so the suite exercises the shape the binary actually produces.
+
+Shapes, verbatim from the capture:
+
+```json
+{"type":"tool_execution_start","toolCallId":"read_0","toolName":"read",
+ "args":{"path":"pyproject.toml","offset":1,"limit":50}}
+
+{"type":"tool_execution_end","toolCallId":"read_0","toolName":"read",
+ "result":{"content":[{"type":"text","text":"[project]\nname = \"metaharness\"..."}]}}
+```
+
+Notes that cost a real run to learn:
+
+* **The built-in tools are named `read`, `bash`, `edit`, `write`** (`pi --help`: "read, bash,
+  edit, write tools"). Passing `--tools read_file` is accepted and yields a session with *no*
+  tools at all -- the model then answers "my available tools list is empty". A wrong tool name
+  fails silently, which is why the tool list is a constant with the help text quoted beside it.
+* `tool_execution_end` carries **no duration**; `durationMs` exists only in `--mode json`. The
+  parser records `duration_ms: null` rather than timing the tool itself.
+* Before the execution events, the same call also appears as
+  `message_update.assistantMessageEvent.type == "toolcall_start" | "toolcall_delta" |
+  "toolcall_end"`. Those are the streamed *intent*; the execution events are the fact, so the
+  canonical events come from the latter only -- otherwise every call would be counted twice.
+* `get_state` answers `model` as an **object** (`{"id": "kimi-k3", "provider": "opencode-go",
+  ...}`), not a string. The adapter normalises it to the id before it reaches a projection; the
+  first real run failed the `sessions` projection with `type 'dict' is not supported` until it did.

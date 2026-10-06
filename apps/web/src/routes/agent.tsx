@@ -30,7 +30,10 @@ import {
 import { EmptyState, Failure, KeyValues, Loading, Panel } from "../components/Panel";
 import { useStream } from "../stream";
 
-const TOOLS = ["read_file", "bash", "edit", "write"];
+//: Pi's own built-in tool names (from `pi --help`: "read, bash, edit, write tools"). Using a
+//: name Pi does not know silently produces a session with no tools at all, which the first real
+//: end-to-end run demonstrated: the model answered "my available tools list is empty".
+const TOOLS = ["read", "bash", "edit", "write"];
 
 function StreamingText({ text }: { text: string }) {
   if (!text) return null;

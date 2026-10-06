@@ -27,6 +27,7 @@ SUITES: dict[str, list[str]] = {
     "store": ["tests/unit/store", "-"],  # WP-004 acceptance tests A1/A2/A5/A6/A8
     "replay": ["tests/integration/replay", "-"],  # WP-004 A3/A4/A7/A9
     "integration": ["tests/integration", "-"],
+    "conformance": ["tests/conformance", "-"],  # WP-018: the Pi adapter vs the captured wire format
 }
 
 #: Modules each suite needs in the interpreter that runs it. Checked up front so
@@ -40,6 +41,7 @@ SUITE_REQUIREMENTS: dict[str, tuple[str, ...]] = {
     "store": ("pydantic", "platformdirs"),
     "replay": ("pydantic", "psutil"),
     "integration": ("fastapi", "websockets", "psutil"),
+    "conformance": ("fastapi", "pydantic", "psutil"),
 }
 
 
@@ -94,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
             print(name)
         return 0
 
-    selected = args.suite or ["v1", "unit", "contracts", "store", "integration", "replay"]
+    selected = args.suite or ["v1", "unit", "contracts", "store", "integration", "replay", "conformance"]
     results: dict[str, int] = {}
     for name in selected:
         missing = missing_requirements(name)

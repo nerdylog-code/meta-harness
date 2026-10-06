@@ -44,14 +44,45 @@ MODELLED_RECORD_TYPES = {
     "turn_end",
     "message_start",
     "message_end",
+    # `--mode json` names these tool_start/tool_end; `--mode rpc` names them
+    # tool_execution_start/tool_execution_end. Both are accepted, because the difference is a
+    # property of the transport mode, not of the event. Verified against the real binary: see
+    # docs/protocols/PI_RPC.md "Tool calls".
     "tool_start",
     "tool_end",
     "tool_call",
     "tool_result",
+    "tool_execution_start",
+    "tool_execution_end",
     "error",
     "retry",
     "compaction",
 } | TRANSIENT_RECORD_TYPES
+
+
+def _tool_result_text(result: Any) -> str:
+    """The tool's text, not a Python repr of its envelope.
+
+    In RPC mode a result arrives as ``{"content": [{"type": "text", "text": "..."}]}``; the first
+    real run showed ``str(result)`` would have stored the envelope's repr instead of the file
+    the tool read.
+    """
+    if isinstance(result, str):
+        return result
+    if isinstance(result, dict):
+        content = result.get("content")
+        if isinstance(content, list):
+            parts = [
+                block.get("text")
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            ]
+            joined = "\n".join(part for part in parts if isinstance(part, str) and part)
+            if joined:
+                return joined
+        if isinstance(result.get("text"), str):
+            return result["text"]
+    return "" if result is None else str(result)
 
 
 @dataclass(frozen=True)
@@ -427,13 +458,14 @@ class PiParser:
 
     def _on_tool_end(self, record: dict[str, Any]) -> ParsedEvent:
         name = str(record.get("toolName") or record.get("name") or "unknown")
-        result = record.get("result")
-        rendered = result if isinstance(result, str) else str(result)
+        rendered = _tool_result_text(record.get("result"))
         return ParsedEvent(
             kind="tool.completed",
             payload={
                 "tool": name,
                 "call_id": record.get("toolCallId") or record.get("id"),
+                # In RPC mode Pi reports no duration, so this stays null. Measuring our own
+                # clock here would be *our* timing wearing the tool's name.
                 "duration_ms": record.get("durationMs"),
                 "result_preview": rendered[:MAX_TOOL_PREVIEW],
                 "result_chars": len(rendered),
@@ -447,6 +479,14 @@ class PiParser:
         return self._on_tool_start(record)
 
     def _on_tool_result(self, record: dict[str, Any]) -> ParsedEvent:
+        return self._on_tool_end(record)
+
+    def _on_tool_execution_start(self, record: dict[str, Any]) -> ParsedEvent:
+        """RPC spelling of `tool_start`."""
+        return self._on_tool_start(record)
+
+    def _on_tool_execution_end(self, record: dict[str, Any]) -> ParsedEvent:
+        """RPC spelling of `tool_end`."""
         return self._on_tool_end(record)
 
     def _on_error(self, record: dict[str, Any]) -> ParsedEvent:

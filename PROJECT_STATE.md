@@ -12,12 +12,13 @@ machine. It is the owner's document, unedited.
 
 ## Current phase
 
-**WP-004 complete — SQLite is the canonical store.** A single append-only event log with
-migrations, transactional projections, artifact externalization, replay equivalence, a
-derived JSONL export and boot reconciliation. A1–A9 pass locally (store 54 tests, replay 21
-tests, ~7 s combined); A10 is the two-OS CI matrix.
-**The CI matrix is green on `ubuntu-latest` and `windows-latest`** (run `37377861032`), which
-closed the WP-002 and WP-005 gates with measured evidence instead of a written contract.
+**M1 — Living Agent — is complete, and it was proven against the real runtime.** A mission, the
+agent *Nova*, a Pi session on provider `opencode-go` / model `kimi-k3`, a real `read` tool call,
+its events and its `provider_reported` usage in the canonical store, a proven cancel with no
+surviving process, and then a daemon restart after which Nova, the mission, the session history
+and every event are still there. `scripts/e2e_m1.py` is the proof, run by hand because it needs
+the binary, a provider and real credit. WP-015 → WP-020 are done; 292 tests green locally and the
+CI matrix is green on `ubuntu-latest` and `windows-latest`.
 `master` and the tag `v0.1-hermes-hosted` are untouched.
 
 | WP | State |
@@ -28,6 +29,12 @@ closed the WP-002 and WP-005 gates with measured evidence instead of a written c
 | WP-003 — Contracts foundation | **done and signed off** — 24 wire contracts, per-metric provenance, payload-bound approvals, `RuntimeAdapter` v2, `FakeRuntimeAdapter` + conformance suite, generated JSON Schema + TypeScript mirror in parity (113 tests, runs on both OSes) |
 | WP-004 — Event store v2 | **done** — SQLite canonical (ADR-0003 implemented): 3 migrations, append-only log enforced by triggers, transactional projections, idempotent appends, content-addressed artifacts, replay equivalence on 10 007 events, JSONL export, boot reconciliation in its own package |
 | WP-006 — Web shell | **done** — TanStack Router + Query, one websocket in context with an honest three-state connection, event inspector (live or durable backlog, labelled), mission/agents/system shells that state what does not exist yet; DOM verified in headless Chromium |
+| WP-015 — Pi transport | **done** — long-lived `pi --mode rpc` JSONL over stdin/stdout under `ProcessSupervisor`; `--mode json` is observation only; no ANSI scraping |
+| WP-016 — Pi parser | **done** — records → `CanonicalEvent`; deltas folded into messages and never persisted; usage keeps `provider_reported` provenance and an absent metric stays `null` |
+| WP-017 — Pi RuntimeAdapter | **done** — `send()` returns at the runtime's disposition; completion is `runtime.pi.settled`; provider/model come from the spec or the runtime's own answer, never from a literal |
+| WP-018 — Runtime conformance | **done** — 18 tests against a scripted peer that speaks the *captured* wire format, including the RPC tool-event names; runs in the CI matrix on both OSes |
+| WP-019 — Agent/Session projections + API + Chat UI | **done** — migration 0004, three projections, `/v1/missions`, `/v1/agents`, `/v1/sessions`, messages, cancel, events; the roster and the agent page with a composer, streaming text, usage with provenance, tool list and cancel |
+| WP-020 — Runtime events UI | **done, folded into the agent page** — usage with per-metric provenance, bounded tool previews, and settled/open/cancelled shown as three different states |
 | WP-007 — Tauri shell | **after the M1 slice** — it packages something that already works |
 
 ## Working (verified in this checkout)
@@ -53,22 +60,20 @@ closed the WP-002 and WP-005 gates with measured evidence instead of a written c
 
 ## Not yet built (explicitly)
 
-No runtime adapter, no missions/tasks/approvals tables, no context engine, no plugin
-kernel, no secrets broker, no channels, no voice, no RAG, no Tauri shell, no auth token
-enforcement (the enforced property today is **loopback-only**), and the daemon does not yet
-read or write through the store (WP-004 delivered the storage kernel; the wiring is the
-next slice).
+No context engine, no plugin kernel, no secrets broker, no channels, no voice, no RAG, no Tauri
+shell, no auth token enforcement (the enforced property today is **loopback-only**), no approvals
+table, no tasks table. The Pi adapter is the only runtime; Hermes/OpenClaw/OMP are adapters on
+paper (ADR-0006) and nothing more.
 
 ## Next
 
-1. **The Pi wave (WP-015 → WP-019) and the M1 gate.** The protocol is no longer a guess: Pi
-   `0.99.2` is installed here, its own `docs/rpc.md`/`docs/rpc-commands.md` are the spec, and two
-   live probes confirmed both transports — `--mode json -p` for a one-shot event stream, and
-   `--mode rpc` as a long-lived JSONL protocol (which produces *no* output when misused as a
-   print mode). A real turn ran on provider `opencode-go` / model `kimi-k3` and reported
-   per-message `usage` + `cost`, which map onto `UsageSample` as `provider_reported`.
-   Spec: `docs/protocols/PI_RPC.md`. Packages: `docs/work-packages/WP-015…WP-020`.
-2. **WP-007 — Tauri shell** (after the slice; it packages something that already works).
+1. **WP-007 — Tauri shell**: package what now works (the daemon plus the built web bundle) as a
+   desktop app, on both OSes, with the same "no second source of truth" rule.
+2. **M2 — the rest of the runtime surface**: approvals (the adapter declares
+   `approval.native` unsupported with a reason), tasks, artifact inspection in the UI, and the
+   Hermes adapter via ACP over stdio (ADR-0016) so that "move Nova to Hermes" is a version bump
+   and not a rewrite.
+3. **Event-log retention** — the log has no compaction or archival policy yet.
 
 ## Important decisions
 
@@ -91,7 +96,23 @@ git log --oneline --decorate -6
 ## Honest limitations
 
 - The v2 suites run locally on Python 3.12; the v1 suite also passes under the Hermes venv interpreter (3.13). A bare 3.14 without PyYAML fails the v1 suite, which `scripts/test.py` now diagnoses with the interpreter path and the exact command to use.
-- The web page's **DOM was not exercised in a browser** — only the HTTP delivery of the bundle was verified. Visual QA belongs to WP-006.
+- **The web page's DOM was exercised in headless Chromium for the WP-006 shell.** The agent
+  page (WP-019) was verified over HTTP and by its own integration tests, not yet in a browser.
+- **The real provider call is verified on Linux only.** On Windows the CI matrix runs the
+  conformance suite, the parser and the transport lifecycle against the scripted peer — so
+  *protocol/conformance verified on Windows* — but the `pi` binary, a configured provider and a
+  model are not available on the runner, so **a real provider call is NOT verified on Windows**.
+  Saying otherwise would be fake green.
+- **Pi names its tool events differently per transport mode**: `tool_start`/`tool_end` in
+  `--mode json`, `tool_execution_start`/`tool_execution_end` in `--mode rpc`. The parser accepts
+  both and the fake peer emits the RPC spelling; the divergence cost a real run to find
+  (`docs/protocols/PI_RPC.md` §Tool calls).
+- **A wrong tool name fails silently.** Pi accepts `--tools read_file` and starts a session with
+  no tools at all; the model then answers that its tool list is empty. Only the real run showed
+  it. Pi's built-ins are `read`, `bash`, `edit`, `write`.
+- **`duration_ms` is `null` in RPC mode** because Pi reports no duration there. Timing the tool
+  ourselves would be our clock wearing the tool's name, so the field stays null and the UI prints
+  `?` rather than a number we did not measure.
 - `StaticFiles(html=True)` does **not** provide SPA fallback: an unknown path returns 404 rather than index.html. The router arrives with WP-006 and must add the fallback.
 - Durability is absent by design: the event ring is in memory, so a restart loses events. WP-004 makes SQLite canonical (ADR-0003).
 - `doctor.py` exits 2 when only warnings remain (missing pnpm/node/web bundle), which is information, not failure; CI calls it with `--report-only` because a runner is expected to be partial.
@@ -100,10 +121,9 @@ git log --oneline --decorate -6
 - **`synchronous=NORMAL`.** A power cut can lose the tail of the log. What it cannot do is
   corrupt the database or leave a partial event, and the crash test asserts exactly that
   bound rather than "nothing was lost" (`docs/architecture/STORAGE.md` §4).
-- **The daemon still speaks through its own in-memory envelope.** `apps/daemon/metaharness/events.py`
-  (WP-002) carries a hand-rolled `CanonicalEvent` that duplicates the frozen contract, and
-  the API does not yet read or write the store. That duplication is a defect to delete in
-  the wiring slice, not a design.
+- **The daemon has one envelope, and it is the frozen contract.** The hand-rolled duplicate was
+  deleted in the wiring slice; `events.py` re-exports the contract type, and two tests keep the
+  duplicate from coming back (an identity check and an AST walk over the module).
 - **The event log has no retention policy**, so it grows forever until compaction or
   archival is specified. The JSONL export is the backup story until then.
 - **Boot reconciliation reports `leases_released: 0`** with an explanatory note, because the

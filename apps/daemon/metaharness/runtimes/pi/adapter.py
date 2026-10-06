@@ -84,6 +84,34 @@ UNSUPPORTED_NOTES: dict[str, str] = {
 EVENT_QUEUE_MAX = 10_000
 
 
+def _model_id(state: dict[str, Any]) -> str | None:
+    """Pi reports the model as an object; the wire contract wants an id.
+
+    Discovered by the real end-to-end run: `get_state` answers
+    ``{"model": {"id": "kimi-k3", "provider": "opencode-go", ...}}``, and binding that object to
+    the `sessions.model` column failed the projection -- correctly, loudly, and without
+    persisting the event. This is the normalisation that keeps the contract's string.
+    """
+    model = state.get("model")
+    if isinstance(model, dict):
+        identifier = model.get("id") or model.get("name")
+        return str(identifier) if identifier else None
+    return str(model) if model else None
+
+
+def _provider_id(state: dict[str, Any]) -> str | None:
+    provider = state.get("provider")
+    if isinstance(provider, dict):
+        identifier = provider.get("id") or provider.get("name")
+        return str(identifier) if identifier else None
+    if provider:
+        return str(provider)
+    model = state.get("model")
+    if isinstance(model, dict) and model.get("provider"):
+        return str(model["provider"])
+    return None
+
+
 @dataclass
 class _Session:
     session_id: str
@@ -130,6 +158,9 @@ class PiRuntimeAdapter:
         self.probe_timeout_s = probe_timeout_s
         self.sessions: dict[str, _Session] = {}
         self.protocol_errors: list[str] = []
+        #: Commands Pi advertises that this adapter does not model. Kept out of CapabilitySet
+        #: on purpose: that type validates its keys against the frozen capability vocabulary.
+        self.advertised_commands: list[str] = []
 
     # ------------------------------------------------------------------ discovery
 
@@ -191,21 +222,23 @@ class PiRuntimeAdapter:
             name="pi",
             version=str(state.get("version") or "") or None,
             available=True,
-            detail=f"provider={state.get('provider')} model={state.get('model')}",
+            detail=f"provider={_provider_id(state)} model={_model_id(state)}",
             protocol=PROTOCOL_NAME,
             capabilities=capabilities,
         )
 
     def _capability_set(self, advertised: Iterable[str] | None = None) -> CapabilitySet:
-        advertised = set(advertised or ())
+        """Known capability ids only.
+
+        A `CapabilitySet` validates its keys against the frozen vocabulary, so an
+        ``pi.<command>`` entry would be a contract violation rather than extra information.
+        Commands Pi advertises that we do not model are kept on ``advertised_commands``
+        instead: visible, but not smuggled into a typed field that means something else.
+        """
+        self.advertised_commands = sorted(set(advertised or ()))
         capabilities: dict[str, CapabilityInfo] = {}
         for capability in SUPPORTED_CAPABILITIES:
             capabilities[capability] = CapabilityInfo(supported=True, metadata={"source": "pi_docs"})
-        # Anything the runtime advertised but we do not model is reported as unsupported
-        # with the raw command name, so the gap is visible instead of invisible.
-        for command in sorted(advertised):
-            key = f"pi.{command}"
-            capabilities.setdefault(key, CapabilityInfo(supported=False, note="advertised by pi, not modelled"))
         for capability, note in UNSUPPORTED_NOTES.items():
             capabilities[capability] = CapabilityInfo(supported=False, note=note)
         return CapabilitySet(capabilities=capabilities)
@@ -289,8 +322,8 @@ class PiRuntimeAdapter:
 
         try:
             state = await transport.command("get_state", timeout_s=self.probe_timeout_s)
-            session.provider = state.get("provider")
-            session.model = state.get("model")
+            session.provider = _provider_id(state)
+            session.model = _model_id(state)
             session.pi_session_id = state.get("sessionId")
         except PiTransportError as exc:
             # A session that cannot answer get_state is still usable, but the caller must be

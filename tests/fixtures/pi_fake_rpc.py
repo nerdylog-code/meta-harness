@@ -185,20 +185,22 @@ def main() -> int:
             if args.emit_tools:
                 emit(
                     {
-                        "type": "tool_start",
-                        "toolName": "read_file",
+                        # The real RPC names and shapes, captured from the binary (see
+                        # docs/protocols/PI_RPC.md). A fake that speaks its own dialect proves
+                        # nothing about the real one.
+                        "type": "tool_execution_start",
+                        "toolName": "read",
                         "toolCallId": "call-1",
-                        "args": {"path": "pyproject.toml"},
+                        "args": {"path": "pyproject.toml", "offset": 1, "limit": 50},
                     },
                     crlf=crlf,
                 )
                 emit(
                     {
-                        "type": "tool_end",
-                        "toolName": "read_file",
+                        "type": "tool_execution_end",
+                        "toolName": "read",
                         "toolCallId": "call-1",
-                        "result": {"content": "[project]" * 40},
-                        "durationMs": 12,
+                        "result": {"content": [{"type": "text", "text": "[project]" * 40}]},
                     },
                     crlf=crlf,
                 )

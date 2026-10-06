@@ -251,13 +251,19 @@ async def cancel_session(session_id: str, request: Request) -> dict[str, Any]:
         for event in bus.recent(200)
         if event.kind == "runtime.pi.cancelled" and event.session_id == session_id
     ]
-    orphans = bool(cancelled[-1].payload_body.get("orphans")) if cancelled else None
+    # `KillReport.orphan_check` is True when the kill was *verified* to leave no survivors, so
+    # the two readings must not be conflated: `orphan_check` is the proof, `orphans_left` is the
+    # alarm. (The first real run showed the inverted name reporting "orphans left" for a clean
+    # kill, which is exactly the kind of lie a field name can tell.)
+    body = cancelled[-1].payload_body if cancelled else {}
+    orphan_check = bool(body.get("orphans", True))
     bus.publish(
         "run.interrupted",
         {
             "reason": "cancelled by request",
             "orphaned": False,
-            "orphans_left": orphans,
+            "orphan_check": orphan_check,
+            "survivors": list(body.get("survivors") or []),
         },
         method="measured",
         run_id=session.spec.metadata.get("run_id"),
@@ -266,7 +272,13 @@ async def cancel_session(session_id: str, request: Request) -> dict[str, Any]:
         session_id=session_id,
         runtime_id=adapter.runtime_id,
     )
-    return {"session_id": session_id, "cancelled": True, "orphans_left": orphans}
+    return {
+        "session_id": session_id,
+        "cancelled": True,
+        "orphan_check": orphan_check,
+        "orphans_left": not orphan_check,
+        "survivors": list(body.get("survivors") or []),
+    }
 
 
 @router.get("/v1/sessions/{session_id}/events")
@@ -291,6 +303,7 @@ async def runtime_status(request: Request) -> dict[str, Any]:
     info = await adapter.probe()
     return {
         "runtime": info.model_dump(mode="json"),
+        "advertised_commands": list(getattr(adapter, "advertised_commands", [])),
         "sessions": [
             {
                 "session_id": session.session_id,

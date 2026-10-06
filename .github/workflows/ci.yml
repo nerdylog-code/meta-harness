@@ -55,6 +55,12 @@ jobs:
       - name: v2 integration suite (real server + websockets)
         run: uv run python scripts/test.py --suite integration
 
+      # The Pi adapter against the wire format captured from the real binary. It needs no
+      # binary, no provider and no credit, so it runs on both OSes -- which is how the
+      # transport lifecycle, the parser and the protocol contract stay verified on Windows.
+      - name: runtime conformance suite (Pi adapter, captured wire format)
+        run: uv run python scripts/test.py --suite conformance
+
   web:
     name: web
     runs-on: ubuntu-latest
