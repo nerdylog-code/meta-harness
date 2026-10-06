@@ -132,10 +132,11 @@ class BootReconciler:
     def _account_artifacts(self) -> tuple[int, list[str]]:
         preserved = 0
         missing: list[str] = []
-        for row in self.store.conn.execute("SELECT id, path FROM artifacts ORDER BY rowid"):
-            path = Path(row["path"])
-            if path.is_file():
+        # Through the store's public API, so the reconciler never touches the connection
+        # directly: the store owns the lock and the schema, this module owns the question.
+        for record in self.store.artifacts():
+            if Path(record.path).is_file():
                 preserved += 1
             else:
-                missing.append(str(row["id"]))
+                missing.append(str(record.id))
         return preserved, missing

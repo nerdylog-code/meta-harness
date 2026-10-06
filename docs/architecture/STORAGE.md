@@ -54,6 +54,22 @@ event**, which is what makes "an event whose projection failed" unrepresentable 
 merely discouraged (A2). The refusal is translated into `ProjectionError` carrying the
 projection, the kind, the seq and the id.
 
+### Threading, and why the lock is not optional
+
+The connection is opened once and shared, with `check_same_thread=False`. That flag is
+required because FastAPI runs synchronous endpoints in a worker thread while the connection
+was opened in the event loop's thread — the daemon does exactly that for `/health` and
+`/v1/events`. It is also **not** sufficient on its own: SQLite connections are unsafe for
+concurrent use, so every read and every write passes through one re-entrant lock
+(`db.connection_lock`), and reads use `db.reading()`. The lock is what makes the sharing
+legal instead of lucky, and the daemon↔store wiring is where the absence of it showed up as
+a 500 on every endpoint.
+
+`publish` is therefore synchronous: a write blocks its caller for one commit. For a local
+single-writer daemon that is the right trade (making it async would force `await` into code
+with no event loop, such as the process supervisor's emit path). If it ever becomes a
+bottleneck, the fix is a write-behind queue here — not a second source of truth.
+
 ## 4. WAL, `synchronous`, and what A7 actually proves
 
 WAL mode with `synchronous=NORMAL`. The honest contract that buys:
@@ -173,11 +189,17 @@ Two honest details:
   transition; tracking liveness per run arrives with the heartbeat feature (BOOK §24,
   PHASE 15). `heartbeat.*` events are persisted and ignored by the projection today, and a
   test pins that behaviour.
+* **The daemon is wired to the store.** `EventBus` publishes through `Store.emit`, so an
+  event is persisted before anyone hears about it; `/v1/events` and the websocket backlog
+  are read from the log rather than from memory, and boot reconciliation runs before the
+  daemon announces itself. WP-002's hand-rolled `CanonicalEvent` is deleted, and two tests
+  keep it deleted (one by identity, one by walking the daemon's source with the AST).
+* **One connection, one lock.** `check_same_thread=False` is not a licence to share a
+  connection freely: it is required because FastAPI runs synchronous endpoints (`/health`,
+  `/v1/events`) in a worker thread while the connection was opened in the loop's thread.
+  Every read and every write goes through a re-entrant lock, which is what makes the
+  sharing legal — and `tests/unit/store/test_connection_threading.py` pins it, including
+  eight threads appending concurrently and a reader watching `seq` never move backwards.
 * **No retention policy.** The log grows forever. Compaction/archival of old events is not
   in scope for this package; the JSONL exporter is the backup story until then.
-* **The daemon still uses its own in-memory event plane** (`apps/daemon/metaharness/events.py`,
-  from WP-002) rather than this store. Wiring the API to the store is the next slice and is
-  deliberately not part of WP-004, whose scope is the storage kernel. Until then the two
-  envelopes coexist, and the daemon's hand-rolled `CanonicalEvent` is a duplicate of the
-  frozen contract that must be deleted rather than maintained.
 * **`synchronous=NORMAL`** means a power cut can lose the log's tail (see §4).

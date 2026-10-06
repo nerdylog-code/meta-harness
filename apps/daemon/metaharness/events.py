@@ -1,103 +1,67 @@
-"""Event plane — the canonical envelope and an in-process broadcast bus.
+"""Event plane — the canonical store plus an in-process fan-out bus.
 
-Scope of WP-002: enough event plumbing for the skeleton to prove it is alive.
-Durable storage is WP-004's job (SQLite is canonical, per ADR-0003); this module
-deliberately keeps only a bounded in-memory ring so a late subscriber still sees
-what just happened.
+The envelope is the **frozen contract** (ADR-0017, WP-003). This module deliberately does
+not define one: WP-002's hand-rolled ``CanonicalEvent`` was a duplicate of the contract, and
+a duplicate envelope is a second source of truth in spirit even when it agrees byte for
+byte. It is deleted, and two tests keep it deleted.
 
-Envelope shape follows PROJECT_BOOK §13 exactly (a flat dict, not a pydantic
-model — the typed contract set is WP-003's deliverable and freezing it here
-would pre-empt the Architect review).
+Two responsibilities, kept apart:
+
+* **durability** belongs to the store (``metaharness.store``). SQLite is canonical; the
+  bus never keeps its own copy of the log, because a bounded in-memory ring is a lossy
+  second log.
+* **delivery** belongs to the bus: who hears about an event *now*, plus a durable backlog
+  read so a late subscriber (or a daemon that just restarted) is never left staring at an
+  empty stream.
+
+``publish`` is synchronous and therefore blocks its caller for one SQLite commit. That is a
+deliberate trade for a local, single-writer daemon: making it async would force ``await``
+into code that has no event loop (the process supervisor emits events from sync methods),
+and WAL keeps the write small. If profiling ever shows it matters, the fix is a write-behind
+queue here -- not a second store.
 """
 
 from __future__ import annotations
 
 import asyncio
-import secrets
 import threading
-import time
-from collections import deque
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Iterator
+from typing import Any, AsyncIterator
 
-RING_SIZE = 256
+from metaharness_contracts import CanonicalEvent
+from metaharness_contracts.events import ENVELOPE_KEYS, PAYLOAD_VERSION_KEY
 
-# Provenance vocabulary (PROJECT_BOOK §17/§49). Every payload must say how it
-# was obtained; mixing `estimated` with `measured` silently is a correctness bug.
+from .store import Store
+
+__all__ = ["ENVELOPE_KEYS", "EventBus", "PROVENANCE_METHODS", "CanonicalEvent"]
+
+#: Provenance vocabulary (PROJECT_BOOK §17/§49). Every payload must say how it was
+#: obtained; mixing `estimated` with `measured` silently is a correctness bug, so an
+#: unknown method is refused here even though the contract leaves `provenance` open.
 PROVENANCE_METHODS = ("measured", "provider_reported", "runtime_reported", "estimated", "unknown")
 
-ENVELOPE_KEYS = (
-    "id",
-    "seq",
-    "ts",
-    "kind",
-    "mission_id",
-    "task_id",
-    "run_id",
-    "agent_id",
-    "session_id",
-    "runtime_id",
-    "correlation_id",
-    "causation_id",
-    "payload",
-    "provenance",
-)
-
-
-def new_id(prefix: str = "evt") -> str:
-    """Sortable, collision-resistant id: time-prefixed + random suffix."""
-    stamp = f"{int(time.time() * 1000):013d}"
-    return f"{prefix}_{stamp}{secrets.token_hex(5)}"
-
-
-@dataclass(frozen=True)
-class CanonicalEvent:
-    kind: str
-    payload: dict[str, Any] = field(default_factory=dict)
-    provenance: dict[str, Any] = field(default_factory=dict)
-    id: str = ""
-    seq: int = 0
-    ts: float = 0.0
-    mission_id: str | None = None
-    task_id: str | None = None
-    run_id: str | None = None
-    agent_id: str | None = None
-    session_id: str | None = None
-    runtime_id: str | None = None
-    correlation_id: str | None = None
-    causation_id: str | None = None
-
-    def __post_init__(self) -> None:
-        if "." not in self.kind:
-            raise ValueError(f"event kind must be namespaced (namespace.name), got {self.kind!r}")
-        method = (self.provenance or {}).get("method")
-        if method not in PROVENANCE_METHODS:
-            raise ValueError(
-                f"event {self.kind!r} needs provenance.method in {PROVENANCE_METHODS}, got {method!r}"
-            )
-
-    def to_dict(self) -> dict[str, Any]:
-        return {key: getattr(self, key) for key in ENVELOPE_KEYS}
+DEFAULT_BACKLOG = 50
 
 
 class EventBus:
-    """Fan-out bus with a bounded replay ring.
+    """Persist, then fan out. Subscribers are asyncio queues owned by the daemon loop."""
 
-    Not thread-safe by design: it is driven by the daemon's event loop. The
-    publish path is synchronous (`put_nowait`) so emitting an event can never
-    block a request handler.
-    """
-
-    def __init__(self, ring_size: int = RING_SIZE) -> None:
-        self._ring: deque[CanonicalEvent] = deque(maxlen=ring_size)
+    def __init__(self, store: Store) -> None:
+        self.store = store
         self._subscribers: set[asyncio.Queue] = set()
-        self._seq = 0
         self._lock = threading.Lock()
+
+    # ------------------------------------------------------------------ identity
 
     @property
     def last_seq(self) -> int:
-        with self._lock:
-            return self._seq
+        """The canonical sequence, owned by the store -- never a local counter."""
+        return self.store.latest_seq()
+
+    @property
+    def subscriber_count(self) -> int:
+        return len(self._subscribers)
+
+    # ------------------------------------------------------------------- writing
 
     def publish(
         self,
@@ -108,52 +72,62 @@ class EventBus:
         origin: str = "kernel",
         **ids: Any,
     ) -> CanonicalEvent:
-        with self._lock:
-            self._seq += 1
-            seq = self._seq
-        # The frozen contract requires each payload to declare its own version
-        # (WP-003 decision 2 / docs/architecture/EVENTS.md); the skeleton stamps
-        # v=1 so nothing can emit an unversioned payload by omission.
-        body = dict(payload or {})
-        body.setdefault("v", 1)
-        event = CanonicalEvent(
-            kind=kind,
-            payload=body,
-            provenance={"method": method, "origin": origin},
-            id=new_id(),
-            seq=seq,
-            ts=time.time(),
-            **{k: v for k, v in ids.items() if k in ENVELOPE_KEYS},
+        """Append the event to the canonical log, then deliver it to subscribers."""
+        if method not in PROVENANCE_METHODS:
+            raise ValueError(
+                f"event {kind!r} needs provenance.method in {PROVENANCE_METHODS}, got {method!r}"
+            )
+        # The store owns `seq` and stamps the payload version (WP-003 decision 2); it also
+        # rejects an event whose projection refuses it, so a delivery can never describe
+        # something that was not persisted.
+        result = self.store.emit(
+            kind, payload, provenance={"method": method, "origin": origin}, **ids
         )
-        self._ring.append(event)
+        event = result.event
+        self._fanout(event)
+        return event
+
+    def _fanout(self, event: CanonicalEvent) -> None:
         stale: list[asyncio.Queue] = []
-        for queue in self._subscribers:
+        with self._lock:
+            subscribers = list(self._subscribers)
+        for queue in subscribers:
             try:
                 queue.put_nowait(event)
             except asyncio.QueueFull:
-                # A slow consumer must not stall the plane: drop it, loudly,
-                # and let it re-attach. Silence would be the bug (BOOK §82).
+                # A slow consumer must not stall the plane: drop it, loudly, and let it
+                # re-attach. Silence would be the bug (BOOK §82).
                 stale.append(queue)
         for queue in stale:
-            self._subscribers.discard(queue)
-        return event
+            self.unsubscribe(queue)
 
-    def recent(self, limit: int = 50) -> list[CanonicalEvent]:
+    # ------------------------------------------------------------------- reading
+
+    def recent(self, limit: int = DEFAULT_BACKLOG) -> list[CanonicalEvent]:
+        """The durable tail of the log, oldest first.
+
+        Read from the store rather than a ring: the backlog a restarted daemon offers is
+        then the real history, not whatever happened to be in memory.
+        """
         if limit <= 0:
             return []
-        return list(self._ring)[-limit:]
+        latest = self.store.latest_seq()
+        if latest == 0:
+            return []
+        start = max(0, latest - limit)
+        return self.store.events(after_seq=start, limit=limit)
+
+    # ------------------------------------------------------------------ delivery
 
     def subscribe(self, maxsize: int = 512) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=maxsize)
-        self._subscribers.add(queue)
+        with self._lock:
+            self._subscribers.add(queue)
         return queue
 
     def unsubscribe(self, queue: asyncio.Queue) -> None:
-        self._subscribers.discard(queue)
-
-    @property
-    def subscriber_count(self) -> int:
-        return len(self._subscribers)
+        with self._lock:
+            self._subscribers.discard(queue)
 
     async def stream(self, queue: asyncio.Queue) -> AsyncIterator[CanonicalEvent]:
         try:
@@ -162,5 +136,7 @@ class EventBus:
         finally:
             self.unsubscribe(queue)
 
-    def __iter__(self) -> Iterator[CanonicalEvent]:
-        return iter(list(self._ring))
+
+def payload_version_key() -> str:
+    """Exposed for tests and docs: the payload must declare its own version."""
+    return PAYLOAD_VERSION_KEY

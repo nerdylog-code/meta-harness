@@ -32,7 +32,15 @@ closed the WP-002 and WP-005 gates with measured evidence instead of a written c
 ## Working (verified in this checkout)
 
 - **Daemon** `apps/daemon/metaharness`: `GET /health`, `GET /version`, `GET /v1/events`, `WS /v1/events/ws` (+ `/events/ws` alias), loopback-only guard, optional static mount of the web bundle.
-- **Event plane**: canonical envelope with all 14 BOOK §13 keys; `kind` must be namespaced; `provenance.method` is required and validated against the Book's vocabulary; bounded ring replays the last 50 events to a late subscriber.
+- **Event plane**: the frozen contract (ADR-0017) with no local copy of it; `kind` must be
+  namespaced; `provenance.method` is required and validated against the Book's vocabulary.
+  The bus persists through the store before delivering, and the websocket replays the
+  durable backlog to a late subscriber.
+- **Store wiring**: the daemon opens the canonical store in its lifespan, runs boot
+  reconciliation, and serves `/health` with the store's schema version, event count and
+  journal mode. Verified end to end by launching the real daemon twice against one data
+  root: `last_seq` 3 → 7, two `system.daemon.started` events in the history, no migration
+  re-run on reopen.
 - **Layout**: `platformdirs` data root (`~/.local/share/MetaHarness` on Linux; `%LOCALAPPDATA%\MetaHarness` on Windows), 7 subdirectories, `METAHARNESS_DATA_DIR` override; repo root *discovered*, never assumed.
 - **Scripts**: `python scripts/dev.py | test.py | doctor.py | package.py` — no Bash, no `shell=True`, works from PowerShell and POSIX.
 - **Canonical store** `apps/daemon/metaharness/store` (WP-004): SQLite WAL, three numbered migrations, `BEGIN IMMEDIATE` per append, `seq` assigned inside the transaction and gap-free, append-only enforced by triggers, idempotent by event id, content-addressed artifacts with no blob column, JSONL export that is derived only. One call proves replay: `uv run python -c "import asyncio, metaharness.store as s; print(asyncio.run(s.replay_equivalence_check()))"`.
@@ -53,13 +61,9 @@ next slice).
 ## Next
 
 1. **WP-006 — web shell** (unblocked; the New Control UI skeleton, no heavy polish yet).
-2. **Daemon ↔ store wiring** — the slice WP-004 deliberately left out: the API must read
-   and write through `metaharness.store`, and the daemon's hand-rolled `CanonicalEvent`
-   (`apps/daemon/metaharness/events.py`, WP-002) must be deleted rather than maintained
-   alongside the frozen contract. Recorded as a defect in `STORAGE.md` §10.
-3. **WP-007 — Tauri shell** (after WP-006).
-4. Then the first adapter (Pi) → the M1 walking skeleton (BOOK §75/§116). WP-003, WP-004 and
-   WP-005 are all green, which is the Book's precondition for starting it (§72).
+2. **Pi RuntimeAdapter + the M1 vertical slice** (BOOK §75/§116) — the precondition is met:
+   WP-003, WP-004 and WP-005 are green, and the daemon now reads and writes the store.
+3. **WP-007 — Tauri shell** (after the slice; it packages something that already works).
 
 ## Important decisions
 

@@ -93,9 +93,11 @@ Two things about the event plane that this changes:
 - `system.store.opened`, `system.store.migrated`, `system.replay.completed` and
   `system.reconcile.completed` join the emitted kinds below.
 
-The in-memory ring in this daemon build remains the live transport until the API is wired
-to the store; that wiring is the next slice, and the duplicate envelope class it leaves
-behind is recorded as a defect to delete, not to maintain.
+The daemon is wired to this store: `EventBus.publish` persists through `Store.emit` before
+delivering, `/v1/events` and the websocket backlog are read from the log (so a restarted
+daemon shows real history), and boot reconciliation runs before the daemon announces itself.
+WP-002's in-memory ring and its hand-rolled `CanonicalEvent` are gone; two tests keep the
+duplicate envelope deleted.
 
 ## Consumers
 

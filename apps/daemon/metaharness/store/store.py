@@ -55,7 +55,7 @@ from .artifacts import (
     store_bytes,
     store_file,
 )
-from .db import connect, integrity_check, journal_mode, transaction
+from .db import connect, integrity_check, journal_mode, reading, transaction
 from .errors import AppendOnlyViolation, StoreError
 
 DEFAULT_DB_NAME = "metaharness.sqlite3"
@@ -275,14 +275,17 @@ class Store:
     # --------------------------------------------------------------------- reading
 
     def get(self, event_id: str) -> CanonicalEvent | None:
-        row = self.conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+        with reading(self.conn):
+            row = self.conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
         return self._row_to_event(row) if row is not None else None
 
     def count(self) -> int:
-        return int(self.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0])
+        with reading(self.conn):
+            return int(self.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0])
 
     def latest_seq(self) -> int:
-        return int(self.conn.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0])
+        with reading(self.conn):
+            return int(self.conn.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0])
 
     def events(
         self,
@@ -322,7 +325,9 @@ class Store:
         if limit is not None:
             sql += " LIMIT ?"
             params.append(limit)
-        return [self._row_to_event(row) for row in self.conn.execute(sql, params)]
+        with reading(self.conn):
+            rows = self.conn.execute(sql, params).fetchall()
+        return [self._row_to_event(row) for row in rows]
 
     def iter_events(self, *, batch: int = 1000, **filters: Any) -> Iterator[CanonicalEvent]:
         """Stream the log in batches without holding it all in memory."""
@@ -340,10 +345,12 @@ class Store:
         return self.events(after_seq=seq_from - 1, until_seq=seq_to)
 
     def snapshot(self) -> dict[str, list[dict[str, Any]]]:
-        return snapshot(self.conn, self.projections)
+        with reading(self.conn):
+            return snapshot(self.conn, self.projections)
 
     def projection_digest(self) -> str:
-        return digest(self.conn, self.projections)
+        with reading(self.conn):
+            return digest(self.conn, self.projections)
 
     def runs(self, *, state: str | None = None) -> list[dict[str, Any]]:
         sql = "SELECT * FROM runs"
@@ -351,14 +358,20 @@ class Store:
         if state is not None:
             sql += " WHERE state = ?"
             params.append(state)
-        return [dict(row) for row in self.conn.execute(sql + " ORDER BY rowid", params)]
+        with reading(self.conn):
+            rows = self.conn.execute(sql + " ORDER BY rowid", params).fetchall()
+        return [dict(row) for row in rows]
 
     def run(self, run_id: str) -> dict[str, Any] | None:
-        row = self.conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+        with reading(self.conn):
+            row = self.conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
         return dict(row) if row is not None else None
 
     def artifact(self, artifact_id: str) -> ArtifactRecord | None:
-        row = self.conn.execute("SELECT * FROM artifacts WHERE id = ?", (artifact_id,)).fetchone()
+        with reading(self.conn):
+            row = self.conn.execute(
+                "SELECT * FROM artifacts WHERE id = ?", (artifact_id,)
+            ).fetchone()
         if row is None:
             return None
         return ArtifactRecord(
@@ -372,11 +385,14 @@ class Store:
         )
 
     def artifacts(self) -> list[ArtifactRecord]:
-        return [
-            self.artifact(row["id"])
-            for row in self.conn.execute("SELECT id FROM artifacts ORDER BY rowid")
-            if row is not None
-        ]  # type: ignore[list-item]
+        with reading(self.conn):
+            ids = [row["id"] for row in self.conn.execute("SELECT id FROM artifacts ORDER BY rowid")]
+        records: list[ArtifactRecord] = []
+        for artifact_id in ids:
+            record = self.artifact(artifact_id)
+            if record is not None:
+                records.append(record)
+        return records
 
     def artifact_bytes(self, artifact_id: str) -> bytes:
         """Read a payload back, verifying its content address on the way out."""
@@ -434,26 +450,32 @@ class Store:
 
     def verify(self) -> VerifyReport:
         """Cheap, honest self-check: SQLite integrity, gap-free seq, parseable payloads."""
-        problems = list(integrity_check(self.conn))
-        seqs = [int(row["seq"]) for row in self.conn.execute("SELECT seq FROM events ORDER BY seq")]
-        if seqs != list(range(1, len(seqs) + 1)):
-            problems.append(
-                f"seq is not monotonic and gapless: {len(seqs)} events, first {seqs[:3]}, last {seqs[-3:]}"
-            )
-        for row in self.conn.execute("SELECT id, payload, provenance FROM events"):
-            try:
-                payload = json.loads(row["payload"])
-                json.loads(row["provenance"])
-            except json.JSONDecodeError as exc:
-                problems.append(f"event {row['id']} has unparseable JSON: {exc}")
-                continue
-            if not isinstance(payload.get("v"), int):
-                problems.append(f"event {row['id']} payload carries no version marker")
+        with reading(self.conn):
+            problems = list(integrity_check(self.conn))
+            seqs = [
+                int(row["seq"])
+                for row in self.conn.execute("SELECT seq FROM events ORDER BY seq")
+            ]
+            if seqs != list(range(1, len(seqs) + 1)):
+                problems.append(
+                    f"seq is not monotonic and gapless: {len(seqs)} events, "
+                    f"first {seqs[:3]}, last {seqs[-3:]}"
+                )
+            for row in self.conn.execute("SELECT id, payload, provenance FROM events"):
+                try:
+                    payload = json.loads(row["payload"])
+                    json.loads(row["provenance"])
+                except json.JSONDecodeError as exc:
+                    problems.append(f"event {row['id']} has unparseable JSON: {exc}")
+                    continue
+                if not isinstance(payload.get("v"), int):
+                    problems.append(f"event {row['id']} payload carries no version marker")
+            journal = journal_mode(self.conn)
         return VerifyReport(
             ok=not problems,
             events=len(seqs),
             schema_version=self.schema_version,
-            journal_mode=journal_mode(self.conn),
+            journal_mode=journal,
             problems=tuple(problems),
         )
 

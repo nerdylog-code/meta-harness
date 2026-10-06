@@ -1,19 +1,26 @@
-"""The daemon HTTP + WebSocket application (WP-002 skeleton).
+"""The daemon HTTP + WebSocket application.
 
 Surface, deliberately minimal:
 
-  GET  /health          liveness + identity + resolved layout
+  GET  /health          liveness + identity + resolved layout + store state
   GET  /version         build/runtime identity
-  GET  /v1/events       bounded recent-event read (polling fallback)
+  GET  /v1/events       durable recent-event read (polling fallback)
   WS   /v1/events/ws    live event stream (canonical path, BOOK §64)
   WS   /events/ws       compatibility alias for the WP-002 gate wording
   GET  /                the built web bundle, when one exists
 
-Local-only by construction: the app rejects any request whose peer is not
-loopback. The per-launch secret of BOOK §65 arrives with the UI session
-(WP-006) — until then, "not reachable from off-host" is the enforced property,
-and `docs/architecture/ARCHITECTURE.md` records that gap rather than implying
-an auth story the skeleton does not have.
+Storage is canonical: every emitted event is persisted by `metaharness.store` (ADR-0003)
+before anyone is told about it, so `/v1/events` and the websocket backlog are the real
+history rather than an in-memory ring, and a restart resumes from it.
+
+Boot reconciliation runs once per launch, before the daemon announces itself: persisted
+`running` runs whose process is gone become `orphaned` through a *new* event (BOOK §83).
+The store never asks about processes; that decision lives in `metaharness.reconcile`.
+
+Local-only by construction: the app rejects any request whose peer is not loopback. The
+per-launch secret of BOOK §65 arrives with the UI session (WP-006) — until then, "not
+reachable from off-host" is the enforced property, and `docs/architecture/ARCHITECTURE.md`
+records that gap rather than implying an auth story the skeleton does not have.
 """
 
 from __future__ import annotations
@@ -31,6 +38,8 @@ from starlette.staticfiles import StaticFiles
 
 from . import paths
 from .events import EventBus
+from .reconcile import BootReconciler, PidProbe
+from .store import Store, default_db_path
 from .version import VERSION, git_sha, runtime_info
 
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost", "testclient"}
@@ -96,13 +105,22 @@ class LoopbackOnlyMiddleware:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
-    bus = EventBus()
     started_at = time.time()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         data_root = paths.ensure_layout(settings.data_dir)
         app.state.data_root = data_root
+        # The store is opened here, not at import: a module that writes to disk as a side
+        # effect of being imported is a module nobody can test in isolation.
+        store = Store(default_db_path(settings.data_dir), data_root=settings.data_dir)
+        bus = EventBus(store)
+        app.state.store = store
+        app.state.bus = bus
+        # Reconcile before announcing the daemon, so the first thing a client reads is an
+        # honest picture (BOOK §83).
+        reconcile = BootReconciler(store, PidProbe()).run()
+        app.state.reconcile = reconcile
         bus.publish(
             "system.daemon.started",
             {
@@ -111,6 +129,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "host": settings.host,
                 "port": settings.port,
                 "data_root": str(data_root),
+                "schema_version": store.schema_version,
+                "reconcile": reconcile.as_dict(),
             },
             method="measured",
         )
@@ -118,21 +138,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             yield
         finally:
             bus.publish("system.daemon.stopping", {"reason": "shutdown"}, method="measured")
+            store.close()
 
     app = FastAPI(
         title="Meta-Harness",
         version=VERSION,
-        description="Local-first control plane for heterogeneous AI agents (WP-002 skeleton).",
+        description="Local-first control plane for heterogeneous AI agents.",
         lifespan=lifespan,
     )
-    app.state.bus = bus
+    app.state.bus = None
+    app.state.store = None
     app.state.settings = settings
     app.state.started_at = started_at
     app.add_middleware(LoopbackOnlyMiddleware)
 
+    def _bus(app_or_request: Any = None) -> EventBus:
+        bus = getattr(app.state, "bus", None)
+        if bus is None:  # pragma: no cover - only reachable outside the lifespan
+            raise RuntimeError("the event plane is not running; the app must be used inside its lifespan")
+        return bus
+
     def health_payload() -> dict[str, Any]:
         web_root = settings.resolved_web_root()
-        return {
+        store: Store | None = getattr(app.state, "store", None)
+        reconcile = getattr(app.state, "reconcile", None)
+        bus = getattr(app.state, "bus", None)
+        payload: dict[str, Any] = {
             "status": "ok",
             "service": "meta-harness",
             "version": VERSION,
@@ -140,8 +171,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "uptime_s": round(time.time() - started_at, 3),
             "data_root": str(settings.resolved_data_dir()),
             "web_bundle": str(web_root) if web_root else None,
-            "events": {"last_seq": bus.last_seq, "subscribers": bus.subscriber_count},
+            "events": {
+                "last_seq": bus.last_seq if bus else 0,
+                "subscribers": bus.subscriber_count if bus else 0,
+            },
+            "store": {
+                "path": str(store.path) if store else None,
+                "schema_version": store.schema_version if store else None,
+                "events": store.count() if store else None,
+                "journal_mode": store.verify().journal_mode if store else None,
+            },
+            "reconcile": reconcile.as_dict() if reconcile else None,
         }
+        return payload
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -157,13 +199,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/v1/events")
     def events(limit: int = BACKLOG_LIMIT) -> dict[str, Any]:
         limit = max(1, min(limit, 256))
+        bus = _bus()
         return {
-            "events": [event.to_dict() for event in bus.recent(limit)],
+            "events": [event.model_dump(mode="json") for event in bus.recent(limit)],
             "last_seq": bus.last_seq,
         }
 
     async def _event_stream(websocket: WebSocket) -> None:
         await websocket.accept()
+        bus = _bus()
         queue = bus.subscribe()
         attached = bus.publish(
             "system.session.attached",
@@ -171,15 +215,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             method="measured",
         )
         try:
-            # Replay the ring first so a fresh client sees what already
-            # happened (notably system.daemon.started) instead of an empty
-            # stream that looks like a hang.
+            # Replay the durable backlog first so a fresh client sees what already
+            # happened (notably system.daemon.started) instead of an empty stream that
+            # looks like a hang -- and so a restarted daemon has history to show.
             for event in bus.recent(BACKLOG_LIMIT):
-                await websocket.send_json(event.to_dict())
+                await websocket.send_json(event.model_dump(mode="json"))
             if not bus.recent(1):
-                await websocket.send_json(attached.to_dict())
+                await websocket.send_json(attached.model_dump(mode="json"))
             async for event in bus.stream(queue):
-                await websocket.send_json(event.to_dict())
+                await websocket.send_json(event.model_dump(mode="json"))
         except WebSocketDisconnect:
             pass
         except RuntimeError:  # pragma: no cover - send after close

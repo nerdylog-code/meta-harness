@@ -33,9 +33,19 @@ WAL_MODE = "wal"
 SYNCHRONOUS = "NORMAL"
 BUSY_TIMEOUT_MS = 5000
 
-#: A store handle is a single-writer object; the lock makes that explicit instead of
-#: leaving it to the caller's discipline.
-_WRITE_LOCK = threading.RLock()
+#: One connection, serialised by one lock.
+#:
+#: ``check_same_thread=False`` is required because a synchronous FastAPI endpoint runs in a
+#: worker thread, not in the loop that opened the connection -- the daemon does exactly that
+#: for ``/health`` and ``/v1/events``. Disabling that check is only safe *because* every use
+#: of the connection goes through this lock: SQLite connections are not safe for concurrent
+#: use, and the lock is what makes the sharing legal rather than lucky. It is re-entrant so
+#: that a write transaction can call a read helper without deadlocking.
+_CONNECTION_LOCK = threading.RLock()
+
+
+def connection_lock() -> threading.RLock:
+    return _CONNECTION_LOCK
 
 
 def connect(path: str | Path, *, create: bool = True) -> sqlite3.Connection:
@@ -49,6 +59,7 @@ def connect(path: str | Path, *, create: bool = True) -> sqlite3.Connection:
             str(path),
             isolation_level=None,  # we manage transactions explicitly
             timeout=BUSY_TIMEOUT_MS / 1000,
+            check_same_thread=False,  # see _CONNECTION_LOCK: the lock is the safety, not the check
         )
     except sqlite3.Error as exc:  # pragma: no cover - environment dependent
         raise StoreError(f"cannot open store at {path}: {exc}") from exc
@@ -69,7 +80,7 @@ def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     (SQLite has no real nesting), which keeps the "one transaction per append" rule
     intact when a projection needs to write more than once.
     """
-    with _WRITE_LOCK:
+    with _CONNECTION_LOCK:
         if conn.in_transaction:
             yield conn
             return
@@ -80,6 +91,13 @@ def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
             conn.execute("ROLLBACK")
             raise
         conn.execute("COMMIT")
+
+
+@contextmanager
+def reading(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """Serialise a read against the one connection. Same lock, no transaction."""
+    with _CONNECTION_LOCK:
+        yield conn
 
 
 def journal_mode(conn: sqlite3.Connection) -> str:

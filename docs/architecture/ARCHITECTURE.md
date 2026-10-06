@@ -15,7 +15,10 @@ not a roadmap; the roadmap is `WP_DAG.md` and `docs/work-packages/`.
    │ apps/daemon/metaharness                                  │
    │                                                          │
    │  app.py      FastAPI surface + loopback guard            │
-   │  events.py   canonical envelope + broadcast bus          │
+   │  events.py   durable event bus (publishes via the store) │
+   │  store/      canonical SQLite log, projections, replay    │
+   │  reconcile/  boot reconciliation (asks the outside world) │
+   │  export/     derived JSONL export                         │
    │  paths.py    platformdirs data root + repo discovery      │
    │  version.py  identity (version, git sha, runtime)        │
    │  process/    ProcessSupervisor (one interface, two OSes) │
@@ -24,7 +27,7 @@ not a roadmap; the roadmap is `WP_DAG.md` and `docs/work-packages/`.
         ┌────────────────────┼─────────────────────┐
         ▼                    ▼                     ▼
    SQLite store         Runtime adapters      Web / desktop UI
-   (WP-004)             (after WP-003)        (WP-006, WP-007)
+   (WP-004, live)       (after WP-003)        (WP-006, WP-007)
 ```
 
 The daemon is the **system of record** (BOOK §5.5). Anything the UI shows is a
@@ -46,30 +49,34 @@ Conventions that the rest of the system will rely on:
 - **Loopback-only.** A pure-ASGI guard refuses every non-loopback peer on both
   HTTP and WebSocket scopes. Binding is `127.0.0.1`; remote access is a later,
   explicit, separately designed feature (BOOK §66).
-- **A late subscriber is never blind.** The event bus keeps a bounded ring
-  (256) and replays the last 50 events on connect, so a fresh client sees
-  `system.daemon.started` instead of an empty stream that looks like a hang.
+- **A late subscriber is never blind.** The bus replays the last 50 events of the
+  *durable* log on connect, so a fresh client sees `system.daemon.started` — including
+  after a daemon restart, when memory would have been empty.
 - **A slow subscriber is dropped, not allowed to stall the plane**, and the
   drop is observable through the subscriber count.
 
 ## 3. Event plane
 
-The envelope is exactly PROJECT_BOOK §13 — flat dict, 14 keys, verified by a
-test that compares the key set to the Book's list. Two invariants are enforced
-at construction time:
+The envelope is the frozen contract (`metaharness_contracts.CanonicalEvent`, ADR-0017) —
+14 keys, verified by tests on both sides. There is exactly one envelope: the daemon's
+WP-002 copy is deleted, and a test walks the daemon's source to keep it deleted.
 
-1. `kind` must be namespaced (`system.daemon.started`).
+The vocabulary is enforced where it belongs:
+
+1. `kind` must be namespaced (`system.daemon.started`) — the contract refuses anything else.
 2. `provenance.method` must be one of `measured`, `provider_reported`,
-   `runtime_reported`, `estimated`, `unknown`.
+   `runtime_reported`, `estimated`, `unknown` — the bus refuses anything else.
 
 Both raise rather than defaulting, because a silently-unlabelled measurement is
 worse than a crash: every later benchmark claim (BOOK §51/§52) depends on this
 label being true.
 
-**Storage is not here.** ADR-0003 makes SQLite the single canonical store
-(WP-004); this module keeps a bounded in-memory ring only. Deleting every
-process is lossless *today* by design — durability arrives with WP-004, and
-that is an explicit gap, not an oversight.
+**Storage is here, and it is canonical.** `EventBus.publish` persists through
+`metaharness.store` before delivering, so an event that was not written is never
+announced; `/v1/events` and the websocket backlog are read from the log. The store assigns
+`seq`, owns the schema, and is the only place state lives (ADR-0003, `STORAGE.md`).
+Reconciliation of what a restart finds is `metaharness.reconcile`, deliberately outside the
+store: the store records, the reconciler asks.
 
 ## 4. Layout and the D1 lesson
 
