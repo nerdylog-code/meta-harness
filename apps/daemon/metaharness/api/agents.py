@@ -44,6 +44,7 @@ class AgentIn(BaseModel):
 
 
 class SessionIn(BaseModel):
+    runtime_id: str | None = None  # which runtime serves it; default is the configured one
     agent_id: str
     mission_id: str | None = None
     task_id: str | None = None
@@ -70,8 +71,19 @@ def _store(request: Request):  # noqa: ANN202
     return store
 
 
-def _adapter(request: Request):  # noqa: ANN202
-    adapter = getattr(request.app.state, "adapter", None)
+def _adapter(request: Request, runtime_id: str | None = None):  # noqa: ANN202
+    """The adapter for a runtime id, or the default one when none was asked for.
+
+    Runtime selection is explicit: an unknown id is a 404, never a silent fallback to another
+    runtime, because "Nova is on Hermes now" must not be true only in the UI.
+    """
+    adapters = getattr(request.app.state, "adapters", None) or {}
+    if runtime_id:
+        chosen = adapters.get(runtime_id)
+        if chosen is None:
+            raise HTTPException(status_code=404, detail=f"unknown runtime {runtime_id}")
+        return chosen
+    adapter = getattr(request.app.state, "adapter", None) or next(iter(adapters.values()), None)
     if adapter is None:
         raise HTTPException(status_code=503, detail="no runtime adapter is configured")
     return adapter
@@ -157,7 +169,7 @@ def list_agents(request: Request) -> dict[str, Any]:
 async def create_session(payload: SessionIn, request: Request) -> dict[str, Any]:
     store = _store(request)
     bus = _bus(request)
-    adapter = _adapter(request)
+    adapter = _adapter(request, payload.runtime_id)
 
     agent = store.rows("SELECT * FROM agents WHERE id = ?", (payload.agent_id,))
     if not agent:
@@ -319,3 +331,36 @@ async def runtime_status(request: Request) -> dict[str, Any]:
         "protocol_errors": adapter.protocol_errors[-10:],
         "checked_at": time.time(),
     }
+
+
+# ------------------------------------------------------------------------ runtimes
+
+
+@router.get("/v1/runtimes")
+async def list_runtimes(request: Request) -> dict[str, Any]:
+    """Every configured runtime, probed, with what it says it can do.
+
+    A runtime that is not installed answers `available: false` with the reason: the UI must be
+    able to say "Hermes is not here" instead of offering a button that cannot work.
+    """
+    adapters = getattr(request.app.state, "adapters", None) or {}
+    default = getattr(request.app.state, "adapter", None)
+    rows = []
+    for runtime_id, adapter in adapters.items():
+        try:
+            info = await adapter.probe()
+            rows.append(
+                {
+                    "runtime_id": runtime_id,
+                    "is_default": adapter is default,
+                    "available": info.available,
+                    "name": info.name,
+                    "version": info.version,
+                    "protocol": info.protocol,
+                    "detail": info.detail,
+                    "capabilities": info.capabilities.model_dump(mode="json"),
+                }
+            )
+        except Exception as exc:  # a probe that explodes is still an answer
+            rows.append({"runtime_id": runtime_id, "is_default": adapter is default, "available": False, "detail": str(exc)})
+    return {"runtimes": rows, "count": len(rows)}

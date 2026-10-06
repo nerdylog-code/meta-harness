@@ -41,6 +41,7 @@ from . import paths
 from .api import agents_router
 from .events import EventBus
 from .reconcile import BootReconciler, PidProbe
+from .runtimes.hermes.adapter import HermesRuntimeAdapter
 from .runtimes.pi.adapter import PiRuntimeAdapter
 from .store import Store, default_db_path
 from .version import VERSION, git_sha, runtime_info
@@ -61,6 +62,8 @@ class Settings:
     #: Argv for the Pi runtime. ``None`` means the real ``pi --mode rpc``; a test or a
     #: different installation can point elsewhere without the daemon hardcoding a binary.
     pi_argv: list[str] | None = None
+    #: Argv for the Hermes runtime. ``None`` means the real ``hermes acp`` (ADR-0016).
+    hermes_argv: list[str] | None = None
 
     def resolved_data_dir(self) -> Path:
         return paths.data_root(self.data_dir)
@@ -136,9 +139,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             data_root_override=settings.data_dir,
             on_event=_on_adapter_event,
         )
+        # One adapter per runtime, resolved by id. `state.adapter` stays as the default so
+        # nothing that predates the second runtime has to change.
+        hermes = HermesRuntimeAdapter(argv=settings.hermes_argv, on_event=_on_adapter_event)
         app.state.store = store
         app.state.bus = bus
         app.state.adapter = adapter
+        app.state.adapters = {adapter.runtime_id: adapter, hermes.runtime_id: hermes}
         # Reconcile before announcing the daemon, so the first thing a client reads is an
         # honest picture (BOOK §83).
         reconcile = BootReconciler(store, PidProbe()).run()
@@ -170,7 +177,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             finally:
                 # Runtimes first: a Pi process must not outlive the daemon that owns it.
                 try:
-                    await adapter.close_all()
+                    # Every adapter, not just the default one: a runtime that was used must be
+                    # released, or its processes outlive the daemon.
+                    for _adapter in getattr(app.state, 'adapters', {}).values():
+                        await _adapter.close_all()
                 except Exception as exc:  # pragma: no cover - already gone
                     app.state.shutdown_error = str(exc)
                 store.close()
