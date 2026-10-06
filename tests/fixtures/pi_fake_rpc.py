@@ -58,12 +58,25 @@ def main() -> int:
     parser.add_argument("--split", action="store_true")
     parser.add_argument("--slow", type=float, default=0.0)
     parser.add_argument("--delay-command", default="", help="CMD:SECONDS — delay only that command")
-    parser.add_argument("--tools", action="store_true")
+    parser.add_argument("--emit-tools", action="store_true", help="emit a tool call pair during a prompt")
     parser.add_argument("--hang", action="store_true")
     parser.add_argument("--die-on", default="")
     parser.add_argument("--huge", type=int, default=0)
     parser.add_argument("--provider", default="fake-provider")
     parser.add_argument("--model", default="fake-model")
+    # Pi's documented CLI flags, accepted so the adapter can pass what a real Pi accepts.
+    # Anything NOT in this list is a hard argparse error: an undocumented flag would be a
+    # silent lie about how the runtime is configured.
+    parser.add_argument("--session-dir", default=None)
+    parser.add_argument("--system-prompt", default=None)
+    parser.add_argument("--append-system-prompt", action="append", default=[])
+    parser.add_argument("--tools", default="")
+    parser.add_argument("--no-tools", action="store_true")
+    parser.add_argument("--no-session", action="store_true")
+    parser.add_argument("--name", default=None)
+    parser.add_argument("--thinking", default=None)
+    parser.add_argument("--continue", dest="continue_session", action="store_true")
+    parser.add_argument("--mode", default="rpc")
     args = parser.parse_args()
 
     crlf = args.crlf
@@ -169,7 +182,7 @@ def main() -> int:
             emit({"type": "text_start"}, crlf=crlf)
             emit({"type": "text_delta", "text": payload}, crlf=crlf)
             emit({"type": "text_end"}, crlf=crlf)
-            if args.tools:
+            if args.emit_tools:
                 emit(
                     {
                         "type": "tool_start",

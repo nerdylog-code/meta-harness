@@ -87,6 +87,29 @@ class EventBus:
         self._fanout(event)
         return event
 
+    def publish_event(self, event: CanonicalEvent) -> CanonicalEvent:
+        """Persist an event somebody else built (an adapter, the reconciler).
+
+        The store owns ``seq``, so a placeholder is replaced on append; what comes back -- and
+        what subscribers see -- is the stored event, never the hopeful one.
+        """
+        result = self.store.append(event)
+        self._fanout(result.event)
+        return result.event
+
+    def publish_transient(self, event: CanonicalEvent) -> CanonicalEvent:
+        """Fan out without persisting: a stream in progress is not history.
+
+        Used for token deltas, which would otherwise put one row per token in the log. The
+        frame is marked ``provenance.persisted = false`` so a client can never mistake a delta
+        for something that was recorded (BOOK §21).
+        """
+        transient = event.model_copy(
+            update={"provenance": {**event.provenance, "persisted": False}}
+        )
+        self._fanout(transient)
+        return transient
+
     def _fanout(self, event: CanonicalEvent) -> None:
         stale: list[asyncio.Queue] = []
         with self._lock:
