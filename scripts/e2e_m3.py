@@ -260,7 +260,10 @@ def _run() -> int:
                 "the token was reachable -- through the control plane's own API, not the filesystem. "
                 "isolation=weak was recorded for exactly this reason."
             )
-            check("the record said isolation is weak, and it was", policy["evidence"]["isolation"] == "weak")
+            # The aggregate level is derived, so it is read from the policy endpoint rather than
+            # from the session.policy event's evidence block, which carries the per-dimension levels.
+            policy_view = get(f"/v1/sessions/{strong_session['session_id']}/policy")
+            check("the record said isolation is weak, and it was", policy_view["isolation"] == "weak")
         else:
             # A timeout is not a pass: an answer that never arrived cannot be said to have failed to
             # find the token, and the agent searching for longer than the wait is not evidence.
