@@ -100,5 +100,39 @@ class TestWebBundleAbsent(unittest.TestCase):
                 self.assertEqual(client.get("/health").status_code, 200)
 
 
+class TestStoreLifecycle(unittest.TestCase):
+    """The daemon owns a real database file, and it must let go of it on shutdown.
+
+    Linux tolerates a held handle (unlinking an open file is allowed), so this test is
+    weak locally and decisive on Windows CI -- which is where the defect appeared, as a
+    confusing `PermissionError` from TemporaryDirectory cleanup in another suite.
+    """
+
+    def test_shutdown_releases_the_database_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = Settings(port=0, data_dir=tmp, serve_web=False)
+            with TestClient(create_app(settings)) as client:
+                self.assertEqual(client.get("/health").status_code, 200)
+                db = Path(tmp) / "data" / "metaharness.sqlite3"
+                self.assertTrue(db.is_file(), "the daemon must create its store in the data root")
+
+            # After the lifespan exits, renaming must succeed: on Windows an open handle
+            # makes this raise, which is exactly the failure we are guarding against.
+            for suffix in ("", "-wal", "-shm"):
+                candidate = Path(str(db) + suffix)
+                if candidate.exists():
+                    candidate.rename(candidate.with_name(candidate.name + ".released"))
+
+    def test_health_reports_the_canonical_store(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = Settings(port=0, data_dir=tmp, serve_web=False)
+            with TestClient(create_app(settings)) as client:
+                store = client.get("/health").json()["store"]
+            self.assertGreaterEqual(store["schema_version"], 3)
+            self.assertEqual(store["journal_mode"], "wal")
+            self.assertGreater(store["events"], 0)
+            self.assertIn("metaharness.sqlite3", store["path"])
+
+
 if __name__ == "__main__":
     unittest.main()

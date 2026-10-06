@@ -25,6 +25,7 @@ records that gap rather than implying an auth story the skeleton does not have.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Collection
 from contextlib import asynccontextmanager
@@ -137,8 +138,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
-            bus.publish("system.daemon.stopping", {"reason": "shutdown"}, method="measured")
-            store.close()
+            # Closing the canonical store must never be conditional on bookkeeping
+            # succeeding. A shutdown that fails to release the database handle leaves the
+            # file locked -- which Linux tolerates (unlinking an open file is allowed) and
+            # Windows does not, so the bug showed up as a test-suite PermissionError there.
+            try:
+                bus.publish("system.daemon.stopping", {"reason": "shutdown"}, method="measured")
+            except Exception as exc:  # pragma: no cover - shutdown must not fail on this
+                app.state.shutdown_error = str(exc)
+            finally:
+                store.close()
 
     app = FastAPI(
         title="Meta-Harness",
@@ -205,6 +214,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "last_seq": bus.last_seq,
         }
 
+    async def _await_disconnect(websocket: WebSocket) -> None:
+        """Resolve when the client goes away.
+
+        Without this, an idle connected client parks the handler on ``queue.get()``
+        indefinitely: the task never finishes, uvicorn waits for it during shutdown, and a
+        closed browser tab leaks a live coroutine. The websocket is the only place the
+        disconnect is visible, so somebody has to be listening to it.
+        """
+        try:
+            while True:
+                message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    return
+        except Exception:  # pragma: no cover - any receive failure means gone
+            return
+
     async def _event_stream(websocket: WebSocket) -> None:
         await websocket.accept()
         bus = _bus()
@@ -214,6 +239,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {"subscribers": bus.subscriber_count, "backlog": len(bus.recent(BACKLOG_LIMIT))},
             method="measured",
         )
+        disconnected = asyncio.create_task(_await_disconnect(websocket))
         try:
             # Replay the durable backlog first so a fresh client sees what already
             # happened (notably system.daemon.started) instead of an empty stream that
@@ -222,13 +248,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await websocket.send_json(event.model_dump(mode="json"))
             if not bus.recent(1):
                 await websocket.send_json(attached.model_dump(mode="json"))
-            async for event in bus.stream(queue):
-                await websocket.send_json(event.model_dump(mode="json"))
+            while True:
+                pending = asyncio.create_task(queue.get())
+                done, _ = await asyncio.wait(
+                    {pending, disconnected}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if disconnected in done:
+                    pending.cancel()
+                    break
+                await websocket.send_json(pending.result().model_dump(mode="json"))
         except WebSocketDisconnect:
             pass
         except RuntimeError:  # pragma: no cover - send after close
             pass
         finally:
+            disconnected.cancel()
             bus.unsubscribe(queue)
 
     app.add_api_websocket_route("/v1/events/ws", _event_stream)

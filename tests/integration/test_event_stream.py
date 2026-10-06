@@ -65,7 +65,14 @@ class LiveDaemon:
         if self._server is not None:
             self._server.should_exit = True
         if self._thread is not None:
-            self._thread.join(timeout=10)
+            self._thread.join(timeout=15)
+            # On Windows a daemon thread that outlives its shutdown keeps the store file
+            # open, and the failure surfaces later as a confusing PermissionError from
+            # TemporaryDirectory. Report it here, where the cause is visible.
+            if self._thread.is_alive():
+                raise RuntimeError(
+                    "the daemon did not shut down within 15s; the store file is still held open"
+                )
 
     @property
     def ws_url(self) -> str:
