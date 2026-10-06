@@ -15,6 +15,7 @@ import {
   createRouter,
 } from "@tanstack/react-router";
 import { AgentsPage } from "./routes/agents";
+import { AgentPage } from "./routes/agent";
 import { EventInspectorPage } from "./routes/events";
 import { MissionOverviewPage } from "./routes/index";
 import { MissionsPage } from "./routes/missions";
@@ -70,6 +71,17 @@ const agentsRoute = createRoute({
   component: AgentsPage,
 });
 
+const agentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/agents/$agentId",
+  component: AgentDetailRoute,
+});
+
+function AgentDetailRoute() {
+  const { agentId } = agentRoute.useParams();
+  return <AgentPage agentId={agentId} />;
+}
+
 const eventsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/events",
@@ -86,6 +98,7 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   missionsRoute,
   agentsRoute,
+  agentRoute,
   eventsRoute,
   systemRoute,
 ]);

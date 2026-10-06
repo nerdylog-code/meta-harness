@@ -344,6 +344,16 @@ class Store:
     def range(self, seq_from: int, seq_to: int) -> list[CanonicalEvent]:
         return self.events(after_seq=seq_from - 1, until_seq=seq_to)
 
+    def rows(self, sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
+        """Explicit SQL against a projection, for readers like the API.
+
+        Deliberately not an ORM and deliberately read-only in practice: projections are written
+        by `apply_event`, never by a caller. This exists so the API can ask a question without
+        each endpoint reinventing the connection handling.
+        """
+        with reading(self.conn):
+            return [dict(row) for row in self.conn.execute(sql, tuple(params)).fetchall()]
+
     def snapshot(self) -> dict[str, list[dict[str, Any]]]:
         with reading(self.conn):
             return snapshot(self.conn, self.projections)

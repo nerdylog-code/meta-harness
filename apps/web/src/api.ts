@@ -123,3 +123,117 @@ export function namespaceOf(kind: string): string {
   const [namespace] = kind.split(".");
   return namespace || "unknown";
 }
+
+// --------------------------------------------------------------- control plane
+
+export interface MissionRow {
+  id: string;
+  title: string;
+  objective: string;
+  owner: string | null;
+  status: string;
+  created_ts: number;
+}
+
+export interface AgentVersionRow {
+  id: string;
+  agent_id: string;
+  version: number;
+  runtime_preferred: string | null;
+  model_primary: string | null;
+}
+
+export interface AgentRow {
+  id: string;
+  display_name: string;
+  role: string;
+  created_ts: number;
+  versions: AgentVersionRow[];
+}
+
+export interface SessionRow {
+  id: string;
+  agent_id: string | null;
+  mission_id: string | null;
+  runtime_id: string | null;
+  provider: string | null;
+  model: string | null;
+  state: string;
+  reason: string | null;
+  created_ts: number;
+}
+
+export interface RuntimeStatus {
+  runtime: {
+    runtime_id: string;
+    name: string;
+    version: string | null;
+    available: boolean;
+    detail: string | null;
+    protocol: string | null;
+    capabilities: { capabilities: Record<string, { supported: boolean; note: string | null }> };
+  };
+  sessions: Array<{
+    session_id: string;
+    agent_id: string | null;
+    streaming: boolean;
+    settled: boolean;
+    dropped_events: number;
+    provider: string | null;
+    model: string | null;
+  }>;
+  protocol_errors: string[];
+}
+
+export const fetchMissions = () => getJson<{ missions: MissionRow[]; count: number }>("/v1/missions");
+export const fetchAgents = () => getJson<{ agents: AgentRow[]; count: number }>("/v1/agents");
+export const fetchSessions = (agentId?: string) =>
+  getJson<{ sessions: SessionRow[]; count: number }>(
+    agentId ? `/v1/sessions?agent_id=${encodeURIComponent(agentId)}` : "/v1/sessions",
+  );
+export const fetchRuntime = () => getJson<RuntimeStatus>("/v1/runtime");
+
+export async function fetchSessionEvents(sessionId: string, limit = 300): Promise<EventEnvelope[]> {
+  const body = await getJson<{ events: EventEnvelope[]; count: number }>(
+    `/v1/sessions/${encodeURIComponent(sessionId)}/events?limit=${limit}`,
+  );
+  return body.events;
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`${path} answered ${response.status}: ${detail.slice(0, 300)}`);
+  }
+  return (await response.json()) as T;
+}
+
+export const createMission = (title: string, objective = "") =>
+  postJson<{ mission_id: string }>("/v1/missions", { title, objective });
+
+export const createAgent = (displayName: string, modelPrimary: string | null) =>
+  postJson<{ agent_id: string }>("/v1/agents", {
+    display_name: displayName,
+    role: "builder",
+    model_primary: modelPrimary,
+  });
+
+export const createSession = (agentId: string, missionId: string | null, tools: string[]) =>
+  postJson<{ session_id: string; run_id: string; runtime_id: string; detail: Record<string, unknown>; pid: number }>(
+    "/v1/sessions",
+    { agent_id: agentId, mission_id: missionId, tools },
+  );
+
+export const sendMessage = (sessionId: string, text: string) =>
+  postJson<{ accepted: boolean }>(`/v1/sessions/${encodeURIComponent(sessionId)}/messages`, { text });
+
+export const cancelSession = (sessionId: string) =>
+  postJson<{ cancelled: boolean; orphans_left: boolean | null }>(
+    `/v1/sessions/${encodeURIComponent(sessionId)}/cancel`,
+    {},
+  );

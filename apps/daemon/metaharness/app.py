@@ -38,8 +38,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
 
 from . import paths
+from .api import agents_router
 from .events import EventBus
 from .reconcile import BootReconciler, PidProbe
+from .runtimes.pi.adapter import PiRuntimeAdapter
 from .store import Store, default_db_path
 from .version import VERSION, git_sha, runtime_info
 
@@ -56,6 +58,9 @@ class Settings:
     data_dir: str | None = None
     web_root: str | None = None
     serve_web: bool = True
+    #: Argv for the Pi runtime. ``None`` means the real ``pi --mode rpc``; a test or a
+    #: different installation can point elsewhere without the daemon hardcoding a binary.
+    pi_argv: list[str] | None = None
 
     def resolved_data_dir(self) -> Path:
         return paths.data_root(self.data_dir)
@@ -108,6 +113,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     started_at = time.time()
 
+    def _on_adapter_event(event, transient: bool) -> None:
+        """Persist before anyone hears about it; a delta is fanned out and never stored."""
+        bus = getattr(app.state, "bus", None)
+        if bus is None:  # pragma: no cover - only during shutdown
+            return
+        if transient:
+            bus.publish_transient(event)
+        else:
+            bus.publish_event(event)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         data_root = paths.ensure_layout(settings.data_dir)
@@ -116,8 +131,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # effect of being imported is a module nobody can test in isolation.
         store = Store(default_db_path(settings.data_dir), data_root=settings.data_dir)
         bus = EventBus(store)
+        adapter = PiRuntimeAdapter(
+            argv=settings.pi_argv,
+            data_root_override=settings.data_dir,
+            on_event=_on_adapter_event,
+        )
         app.state.store = store
         app.state.bus = bus
+        app.state.adapter = adapter
         # Reconcile before announcing the daemon, so the first thing a client reads is an
         # honest picture (BOOK §83).
         reconcile = BootReconciler(store, PidProbe()).run()
@@ -147,6 +168,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except Exception as exc:  # pragma: no cover - shutdown must not fail on this
                 app.state.shutdown_error = str(exc)
             finally:
+                # Runtimes first: a Pi process must not outlive the daemon that owns it.
+                try:
+                    await adapter.close_all()
+                except Exception as exc:  # pragma: no cover - already gone
+                    app.state.shutdown_error = str(exc)
                 store.close()
 
     app = FastAPI(
@@ -267,6 +293,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.add_api_websocket_route("/v1/events/ws", _event_stream)
     app.add_api_websocket_route("/events/ws", _event_stream)  # WP-002 gate alias
+    app.include_router(agents_router)
 
     web_root = settings.resolved_web_root()
     if web_root is not None:

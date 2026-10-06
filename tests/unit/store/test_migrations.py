@@ -122,7 +122,7 @@ class MigrationDisciplineTest(unittest.TestCase):
 
     def test_a5_a_failing_migration_rolls_back_completely(self) -> None:
         broken = _copy_migrations(self.root / "broken")
-        (broken / "0004_sabotage.sql").write_text(
+        (broken / "0005_sabotage.sql").write_text(
             "CREATE TABLE sabotage (a TEXT);\n"
             "INSERT INTO sabotage VALUES ('ok');\n"
             "SELECT * FROM table_that_does_not_exist;\n",
@@ -133,7 +133,7 @@ class MigrationDisciplineTest(unittest.TestCase):
         with self.assertRaises(MigrationError) as caught:
             Store(path, data_root=self.root, migrations_dir=broken)
         message = str(caught.exception)
-        self.assertIn("0004_sabotage", message)
+        self.assertIn("0005_sabotage", message)
         self.assertIn("statement 3", message)
 
         # The half-applied statement must not survive, and the version must not be recorded.
@@ -144,7 +144,7 @@ class MigrationDisciplineTest(unittest.TestCase):
                 for row in survivors.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
             self.assertNotIn("sabotage", tables)
-            self.assertEqual(survivors.schema_version, 3)
+            self.assertEqual(survivors.schema_version, len(discover()))
         finally:
             survivors.close()
 

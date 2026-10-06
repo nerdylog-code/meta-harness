@@ -215,6 +215,37 @@ button:hover { border-color: var(--accent); }
 .empty { padding: 1.1rem 0.75rem; color: var(--muted); font-size: 0.82rem; line-height: 1.6; }
 .empty strong { color: var(--fg); display: block; margin-bottom: 0.25rem; letter-spacing: 0.04em; }
 
+/* ------------------------------------------------------- streaming and transcripts */
+
+.stream {
+  margin: 0 0 0.75rem;
+  padding: 0.6rem 0.7rem;
+  border-left: 2px solid var(--accent);
+  background: var(--panel-2);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 18rem;
+  overflow: auto;
+}
+
+.transcript { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.7rem; }
+.transcript li { border-left: 2px solid var(--line-strong); padding-left: 0.6rem; }
+.transcript li.assistant { border-left-color: var(--accent); }
+.transcript li > span { display: block; font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.transcript pre {
+  margin: 0.25rem 0 0;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tools { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.78rem; }
+.tools li { border-top: 1px solid var(--line); padding-top: 0.3rem; }
+
 @media (max-width: 720px) {
   .app { grid-template-columns: 1fr; }
   .sidebar { border-right: none; border-bottom: 1px solid var(--line); }

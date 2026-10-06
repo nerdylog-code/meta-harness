@@ -1,79 +1,139 @@
 /**
- * Agents: the roster shell.
+ * The roster: real agents, or an honest statement that there are none (WP-019).
  *
- * It exists now, before any agent can exist, so that the M1 slice has somewhere to land. What
- * it shows today is honest: agent identities seen in the log, or an explicit statement that
- * there are none. There is no "create agent" button, because the daemon has no endpoint that
- * could honour it.
+ * Creating an agent here records an identity and its first configuration version. It does not
+ * start anything and does not pretend to: a session is a separate, explicit action on the
+ * agent's own page, because starting a process and spending provider credits is not something
+ * a list should do as a side effect of a button labelled "create".
  */
 
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { fetchRecentEvents } from "../api";
-import { EmptyState, KeyValues, Panel } from "../components/Panel";
-import { useStream } from "../stream";
+import { useState } from "react";
+import { Link } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createAgent, fetchAgents, fetchRuntime } from "../api";
+import { EmptyState, Failure, KeyValues, Loading, Panel } from "../components/Panel";
 
 export function AgentsPage() {
-  const stream = useStream();
-  const backlog = useQuery({
-    queryKey: ["events", "agents"],
-    queryFn: () => fetchRecentEvents(250),
-    refetchInterval: stream.state === "live" ? false : 4000,
+  const queryClient = useQueryClient();
+  const [name, setName] = useState("Nova");
+  const [model, setModel] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const agents = useQuery({ queryKey: ["agents"], queryFn: fetchAgents, refetchInterval: 5000 });
+  const runtime = useQuery({ queryKey: ["runtime"], queryFn: fetchRuntime, refetchInterval: 5000 });
+
+  const create = useMutation({
+    mutationFn: () => createAgent(name, model || null),
+    onSuccess: async (data) => {
+      setNotice(`created ${name} as ${data.agent_id} (version 1)`);
+      await queryClient.invalidateQueries({ queryKey: ["agents"] });
+    },
+    onError: (error: Error) => setNotice(`could not create: ${error.message}`),
   });
 
-  const events = stream.state === "live" && stream.events.length > 0 ? stream.events : (backlog.data ?? []);
+  if (agents.isLoading) return <Loading label="reading the roster" />;
+  if (agents.isError) return <Failure label="agents" error={agents.error} />;
 
-  const agents = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const event of events) {
-      if (event.agent_id) counts.set(event.agent_id, (counts.get(event.agent_id) ?? 0) + 1);
-    }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [events]);
+  const rows = agents.data?.agents ?? [];
 
   return (
     <>
-      <Panel title="agent roster" hint="derived from agent_id in the log">
-        {agents.length === 0 ? (
+      <Panel title="runtime" hint={runtime.data?.runtime.protocol ?? "…"}>
+        {runtime.data ? (
+          <KeyValues
+            rows={[
+              [
+                "pi",
+                runtime.data.runtime.available ? (
+                  <span className="ok">available · {runtime.data.runtime.detail}</span>
+                ) : (
+                  <span className="error">unavailable · {runtime.data.runtime.detail}</span>
+                ),
+              ],
+              [
+                "declared unsupported",
+                <span className="faint">
+                  {Object.entries(runtime.data.runtime.capabilities.capabilities)
+                    .filter(([, info]) => !info.supported)
+                    .map(([key]) => key)
+                    .slice(0, 6)
+                    .join(" · ") || "none"}
+                </span>,
+              ],
+              ["live sessions", String(runtime.data.sessions.length)],
+            ]}
+          />
+        ) : (
+          <Loading />
+        )}
+      </Panel>
+
+      <Panel title="new agent" hint="R1 · recorded as events">
+        <div className="toolbar">
+          <input
+            aria-label="display name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="display name"
+          />
+          <input
+            aria-label="model"
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+            placeholder="model (blank = runtime default)"
+          />
+          <button type="button" onClick={() => create.mutate()} disabled={create.isPending || !name}>
+            create agent
+          </button>
+        </div>
+        {notice ? <p className="tight faint">{notice}</p> : null}
+      </Panel>
+
+      <Panel title="roster" hint={`${rows.length} identities`}>
+        {rows.length === 0 ? (
           <EmptyState title="no agents yet">
-            No event carries an <code>agent_id</code>. An agent identity is a persistent thing the
-            daemon does not model yet: the roster, the agent registry and the Pi runtime adapter
-            arrive together with the M1 slice (BOOK §75), which is what makes an agent
-            <em> alive</em> rather than merely configured.
+            An agent is an identity with a versioned configuration. Create one above, then open it
+            to start a real session on Pi. Until you do, there is nothing here to show — and
+            nothing here is invented.
           </EmptyState>
         ) : (
           <table>
             <thead>
               <tr>
                 <th>agent</th>
-                <th>events</th>
+                <th>role</th>
+                <th>versions</th>
+                <th>runtime policy</th>
+                <th>model policy</th>
+                <th />
               </tr>
             </thead>
             <tbody>
-              {agents.map(([agentId, count]) => (
-                <tr key={agentId}>
-                  <td className="mono">{agentId}</td>
-                  <td className="num">{count}</td>
-                </tr>
-              ))}
+              {rows.map((agent) => {
+                const latest = agent.versions.at(-1);
+                return (
+                  <tr key={agent.id}>
+                    <td>
+                      <Link to="/agents/$agentId" params={{ agentId: agent.id }}>
+                        {agent.display_name}
+                      </Link>
+                      <div className="faint mono">{agent.id}</div>
+                    </td>
+                    <td>{agent.role}</td>
+                    <td className="num">{agent.versions.length}</td>
+                    <td className="mono">{latest?.runtime_preferred ?? "—"}</td>
+                    <td className="mono">{latest?.model_primary ?? "—"}</td>
+                    <td>
+                      <Link to="/agents/$agentId" params={{ agentId: agent.id }}>
+                        open
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
-      </Panel>
-
-      <Panel title="what this page will become" hint="BOOK §61">
-        <KeyValues
-          rows={[
-            ["identity", "name, role, runtime and model policy — versioned, so a mission records which version it used"],
-            ["liveness", "status, current task, workspace and heartbeat — all measured, never assumed"],
-            ["context", "budget pressure and cache behaviour, once usage samples exist"],
-            ["actions", "chat, steer, pause, move runtime — each one an approval-classed operation"],
-          ]}
-        />
-        <p className="tight faint">
-          None of these are shown as empty gauges on purpose. A gauge that always reads zero is a
-          claim that the number is measured.
-        </p>
       </Panel>
     </>
   );

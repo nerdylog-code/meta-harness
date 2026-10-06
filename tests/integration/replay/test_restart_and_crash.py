@@ -28,6 +28,7 @@ import metaharness_contracts as c
 from metaharness.process import supervisor
 from metaharness.reconcile import AllDeadProbe, BootReconciler
 from metaharness.store import Store
+from metaharness.store.migrations import discover
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WRITER = REPO_ROOT / "tests" / "fixtures" / "store_writer.py"
@@ -57,7 +58,7 @@ class RestartPersistenceTest(unittest.TestCase):
         second = Store(self.db, data_root=self.root)
         try:
             self.assertEqual(second.migrations_applied, (), "no migration may run on reopen")
-            self.assertEqual(second.schema_version, 3)
+            self.assertEqual(second.schema_version, len(discover()))
             self.assertEqual(second.count(), events_before + 1, "the boot itself is an event")
             self.assertEqual(second.run(run_id)["state"], "running")
             self.assertEqual(second.run(run_id)["pid"], 4321)
