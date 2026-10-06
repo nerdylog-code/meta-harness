@@ -61,9 +61,13 @@ next slice).
 
 ## Next
 
-1. **Pi RuntimeAdapter + the M1 vertical slice** (BOOK §75/§116) — the precondition is met:
-   WP-003, WP-004, WP-005 and WP-006 are green, and the daemon reads and writes the store.
-   The web shell has somewhere for an agent to appear.
+1. **The Pi wave (WP-015 → WP-019) and the M1 gate.** The protocol is no longer a guess: Pi
+   `0.99.2` is installed here, its own `docs/rpc.md`/`docs/rpc-commands.md` are the spec, and two
+   live probes confirmed both transports — `--mode json -p` for a one-shot event stream, and
+   `--mode rpc` as a long-lived JSONL protocol (which produces *no* output when misused as a
+   print mode). A real turn ran on provider `opencode-go` / model `kimi-k3` and reported
+   per-message `usage` + `cost`, which map onto `UsageSample` as `provider_reported`.
+   Spec: `docs/protocols/PI_RPC.md`. Packages: `docs/work-packages/WP-015…WP-020`.
 2. **WP-007 — Tauri shell** (after the slice; it packages something that already works).
 
 ## Important decisions

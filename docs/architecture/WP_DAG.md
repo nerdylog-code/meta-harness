@@ -117,3 +117,22 @@ Maximum concurrent builders: 3 in W3, 4 in W5 — within the Book's 3–5 envelo
 | WP-005 | Cross-platform ProcessSupervisor | `docs/work-packages/WP-005-process-supervisor.md` |
 | WP-006 | Web skeleton | `docs/work-packages/WP-006-web-skeleton.md` |
 | WP-007 | Tauri skeleton | `docs/work-packages/WP-007-tauri-skeleton.md` |
+
+## W5 — the Pi wave (BOOK §74)
+
+Written after the protocol was observed on this machine rather than guessed; the spec is
+`docs/protocols/PI_RPC.md` (Pi 0.99.2's own `docs/rpc.md` + `docs/rpc-commands.md`, plus two
+live probes).
+
+| ID | Title | File | Depends on |
+|---|---|---|---|
+| WP-015 | Pi transport (JSONL framing, correlation, cancel) | `docs/work-packages/WP-015-pi-transport.md` | WP-005, WP-004 |
+| WP-016 | Pi record parser (events + usage samples) | `docs/work-packages/WP-016-pi-parser.md` | WP-015 |
+| WP-017 | Pi RuntimeAdapter v2 | `docs/work-packages/WP-017-pi-adapter.md` | WP-015, WP-016 |
+| WP-018 | Runtime conformance (both OSes) | `docs/work-packages/WP-018-pi-conformance.md` | WP-017 |
+| WP-019 | Agent chat UI + agent/session projection | `docs/work-packages/WP-019-agent-chat-ui.md` | WP-017, WP-006 |
+| WP-020 | Runtime events UI (usage, tools, settled) | `docs/work-packages/WP-020-runtime-events-ui.md` | WP-019 |
+
+The M1 gate (BOOK §75) is met when WP-015…WP-019 are green **and** one real Pi run has been
+observed end to end: create Nova → session → stream → tool → usage → cancel → restart → Nova
+and the mission still exist.
