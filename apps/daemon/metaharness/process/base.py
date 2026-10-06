@@ -154,7 +154,16 @@ class ProcessSupervisor:
         cwd: str | os.PathLike | None = None,
         env: dict[str, str] | None = None,
         capture: bool = True,
+        drain: bool = True,
     ) -> ProcessHandle:
+        """Start a process.
+
+        ``capture`` creates the pipes; ``drain`` starts the internal readers that keep a
+        bounded preview of each stream. A protocol client (Pi's RPC, for example) must own
+        stdout itself -- two readers on one pipe lose records -- so it passes
+        ``drain=False`` and reads ``handle.process.stdout`` directly, while this supervisor
+        still owns the lifecycle: signals, tree kill and the orphan check.
+        """
         if not argv:
             raise ProcessError("argv must not be empty")
         if isinstance(argv, str):  # a string is a shell habit; refuse it loudly
@@ -170,11 +179,18 @@ class ProcessSupervisor:
             **kwargs,
         )
         handle = ProcessHandle(pid=process.pid, argv=list(argv), cwd=str(cwd) if cwd else None, process=process)
-        if capture:
+        if capture and drain:
             self._streams[process.pid] = {"stdout": _Stream("stdout"), "stderr": _Stream("stderr")}
             self._tasks[process.pid] = [
                 asyncio.create_task(self._drain(process.stdout, self._streams[process.pid]["stdout"])),
                 asyncio.create_task(self._drain(process.stderr, self._streams[process.pid]["stderr"])),
+            ]
+        elif capture:
+            # The caller owns stdout; stderr stays ours for diagnostics, because a protocol
+            # client that also has to capture logs will eventually lose one of them.
+            self._streams[process.pid] = {"stderr": _Stream("stderr")}
+            self._tasks[process.pid] = [
+                asyncio.create_task(self._drain(process.stderr, self._streams[process.pid]["stderr"]))
             ]
         self._emit("system.process.spawned", {"pid": process.pid, "cwd": handle.cwd, "argv_count": len(argv)})
         return handle
