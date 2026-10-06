@@ -22,7 +22,13 @@ from metaharness_contracts import CanonicalEvent
 
 from ..store.errors import ProjectionError
 from .artifacts import ArtifactsProjection
-from .domain import AgentsProjection, CapsulesProjection, MissionsProjection, SessionsProjection
+from .domain import (
+    AgentsProjection,
+    CapsulesProjection,
+    MigrationsProjection,
+    MissionsProjection,
+    SessionsProjection,
+)
 from .runs import RunsProjection
 
 __all__ = [
@@ -30,6 +36,7 @@ __all__ = [
     "AgentsProjection",
     "ArtifactsProjection",
     "CapsulesProjection",
+    "MigrationsProjection",
     "MissionsProjection",
     "Projection",
     "RunsProjection",
@@ -65,6 +72,7 @@ DEFAULT_PROJECTIONS: tuple[Projection, ...] = (
     AgentsProjection(),
     SessionsProjection(),
     CapsulesProjection(),
+    MigrationsProjection(),
 )
 
 

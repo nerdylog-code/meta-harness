@@ -32,7 +32,7 @@ from metaharness.capsule import (
     capsule_bytes,
     verify_capsule,
 )
-from metaharness_contracts.capsule import CapsulePhase
+from metaharness_contracts.capsule import CapsulePhase, ContextCapsule
 from metaharness_contracts import IdKind, Message, SessionSpec, new_id
 
 router = APIRouter()
@@ -623,73 +623,305 @@ class MigrateIn(BaseModel):
     tools: list[str] = Field(default_factory=list)
     mission_id: str | None = None
     reason: str | None = None
+    #: Attach an existing capsule instead of building a fresh one. It is re-verified against the
+    #: bytes on disk, so a tampered capsule -- or one belonging to another agent -- stops the
+    #: migration. The Architect's rule: the capsule is the transfer object, and it must be
+    #: checkable at the moment of transfer, not only when it was written.
+    capsule_id: str | None = None
+
+
+def _migration_state(**overrides: Any) -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "requested": True,
+        "capsule_verified": False,
+        "destination_available": False,
+        "destination_created": False,
+        "capsule_attached": False,
+        "source_archived": False,
+        "completed": False,
+    }
+    state.update(overrides)
+    return state
 
 
 @router.post("/v1/agents/{agent_id}/migrate")
 async def migrate_agent(agent_id: str, payload: MigrateIn, request: Request) -> dict[str, Any]:
-    """R2 — move an agent to another runtime, carrying a verified capsule and nothing else.
+    """R2 -- move an agent to another runtime, carrying a verified capsule and nothing else.
 
-    The order is the one the Architect approved, and it is not arbitrary:
+    A migration is a lifecycle, not an act: it is requested, its capsule is verified, the
+    destination is checked, a session is created there, the capsule is attached to it, the source
+    is archived, and it completes. Each stage is an event and the folded state is queryable, so a
+    partial migration is never hidden -- `migration.failed` says which stage stopped and what had
+    already happened.
 
-    1. build the capsule from the log and **verify** it — an unverified capsule stops here, with a
-       409, before anything has moved;
-    2. archive the session being left (its process is released; its events stay);
-    3. publish a new **version** of the same agent pointing at the new runtime;
-    4. open a session on the target runtime and inject the capsule's resume instruction as its
-       first message.
-
-    The agent id never changes. Chat history is not copied: the transfer object is the capsule, and
-    the old session remains visible as history.
+    Order, and why it is not the obvious one: the capsule is verified and the destination session
+    is created **before** the source is archived. The Architect's requirement is that an
+    unavailable destination must not make the old session disappear, and the only way to guarantee
+    that is to not archive it until the replacement exists and already holds the capsule. The
+    observable outcome is the one he asked for -- source archived, new version on the new runtime,
+    capsule attached -- with a smaller window in which anything can be lost.
     """
     store = _store(request)
     bus = _bus(request)
     if not store.rows("SELECT 1 FROM agents WHERE id = ?", (agent_id,)):
         raise HTTPException(status_code=404, detail=f"unknown agent {agent_id}")
-    target = _adapter(request, payload.to_runtime)
+    target = _adapter(request, payload.to_runtime)  # unknown runtime -> 404, never a silent default
 
+    migration_id = new_id(IdKind.RUN)
     candidates = store.rows(
         "SELECT * FROM sessions WHERE agent_id = ? AND state != 'archived' ORDER BY created_ts DESC LIMIT 1",
         (agent_id,),
     )
     leaving = candidates[0] if candidates else None
+    source_session_id = leaving["id"] if leaving else None
     mission_id = payload.mission_id or (leaving or {}).get("mission_id")
+    from_runtime = (leaving or {}).get("runtime_id")
+    state = _migration_state()
 
-    try:
-        draft = build_capsule(
-            store,
+    def fail(stage: str, reason: str, status_code: int) -> None:
+        """Record the failure, say what had already happened, and stop. Never a silent rollback:
+        the log is append-only and an attempt is a fact."""
+        recovery = {
+            "capsule_verified": "fix the capsule and retry, or let the migration build a fresh one",
+            "destination_unavailable": "make the destination runtime available, then retry: nothing has moved",
+            "destination_created": "nothing has moved; retry once the destination accepts sessions",
+            "capsule_attached": "the destination session was created and then closed; the source is untouched, retry",
+            "source_archived": "the source is archived and the destination holds the capsule; retry to finish, or open a session on the destination directly",
+        }.get(stage, "retry the migration")
+        bus.publish(
+            "migration.failed",
+            {
+                "migration_id": migration_id,
+                "agent_id": agent_id,
+                "mission_id": mission_id,
+                "from_runtime": from_runtime,
+                "to_runtime": payload.to_runtime,
+                "from_session": source_session_id,
+                "stage": stage,
+                "reason": reason,
+                "state": state,
+                "recovery": recovery,
+            },
+            method="measured",
+            correlation_id=migration_id,
             agent_id=agent_id,
-            session_id=leaving["id"] if leaving else None,
             mission_id=mission_id,
         )
-    except CapsuleError as exc:
-        raise HTTPException(status_code=409, detail={"error": "no_material_for_capsule", "detail": str(exc)}) from exc
-
-    report = verify_capsule(store, draft.capsule, expected_agent_id=agent_id)
-    if not report.ok:
-        # Fail closed. A migration that travels on an unverified handoff is the failure mode this
-        # whole work package exists to prevent.
         raise HTTPException(
-            status_code=409,
-            detail={"error": "capsule_unverified", "verification": report.as_dict()},
+            status_code=status_code,
+            detail={
+                "error": "migration_failed",
+                "migration_id": migration_id,
+                "stage": stage,
+                "reason": reason,
+                "state": state,
+                "recovery": recovery,
+            },
         )
 
-    from_runtime = (leaving or {}).get("runtime_id")
-    stored = _store_capsule(
-        store, bus, draft, agent_id=agent_id, session_id=leaving["id"] if leaving else None,
-        mission_id=mission_id, runtime_id=from_runtime,
+    bus.publish(
+        "migration.requested",
+        {
+            "migration_id": migration_id,
+            "agent_id": agent_id,
+            "mission_id": mission_id,
+            "from_runtime": from_runtime,
+            "to_runtime": payload.to_runtime,
+            "from_session": source_session_id,
+            "capsule_id": payload.capsule_id,
+            "reason": payload.reason,
+        },
+        method="measured",
+        correlation_id=migration_id,
+        agent_id=agent_id,
+        mission_id=mission_id,
+        session_id=source_session_id,
+        runtime_id=from_runtime,
     )
-    if not stored["verified"]:
-        raise HTTPException(
-            status_code=409,
-            detail={"error": "capsule_unverified_after_store", "verification": stored["verification"]},
+
+    # --- 1. the capsule: build one, or take the one that was handed over and re-verify it ------
+    if payload.capsule_id:
+        rows = store.rows("SELECT * FROM capsules WHERE id = ?", (payload.capsule_id,))
+        if not rows:
+            fail("capsule", f"unknown capsule {payload.capsule_id}", 404)
+        row = rows[0]
+        if row.get("agent_id") and row["agent_id"] != agent_id:
+            fail("capsule", f"capsule {payload.capsule_id} belongs to agent {row['agent_id']}, not {agent_id}", 409)
+        try:
+            capsule = ContextCapsule.model_validate(json.loads(store.artifact_bytes(payload.capsule_id)))
+        except Exception as exc:
+            fail("capsule", f"the stored bytes are not a valid capsule: {exc}", 409)
+        report = verify_capsule(store, capsule, expected_agent_id=agent_id, stored_digest=row.get("sha256"))
+        if not report.ok:
+            fail("capsule", f"capsule {payload.capsule_id} failed verification: {report.as_dict()['failed']}", 409)
+        stored = {
+            "capsule_id": row["id"],
+            "sha256": row["sha256"],
+            "size": row["size"],
+            "verified": True,
+            "verification": report.as_dict(),
+            "objective": capsule.objective,
+            "evidence": {},
+            "resume_instruction": capsule.resume_instruction,
+            "reused": True,
+        }
+    else:
+        try:
+            draft = build_capsule(
+                store, agent_id=agent_id, session_id=source_session_id, mission_id=mission_id
+            )
+        except CapsuleError as exc:
+            fail("capsule", str(exc), 409)
+        report = verify_capsule(store, draft.capsule, expected_agent_id=agent_id)
+        if not report.ok:
+            fail("capsule", f"the built capsule failed verification: {report.as_dict()['failed']}", 409)
+        stored = _store_capsule(
+            store, bus, draft, agent_id=agent_id, session_id=source_session_id,
+            mission_id=mission_id, runtime_id=from_runtime,
+        )
+        if not stored["verified"]:
+            fail("capsule", "the stored capsule failed verification", 409)
+        capsule = draft.capsule
+
+    state["capsule_verified"] = True
+    bus.publish(
+        "migration.capsule_verified",
+        {
+            "migration_id": migration_id,
+            "capsule_id": stored["capsule_id"],
+            "digest": report.digest,
+            "sha256": stored["sha256"],
+            "checks": report.as_dict()["checks"],
+        },
+        method="measured",
+        correlation_id=migration_id,
+        agent_id=agent_id,
+        mission_id=mission_id,
+        session_id=source_session_id,
+        runtime_id=from_runtime,
+    )
+
+    # --- 2. is the destination actually there? Checked before anything is touched --------------
+    try:
+        info = await target.probe()
+        available = bool(info.available)
+        detail = info.detail
+    except Exception as exc:  # a probe that explodes is an unavailable destination
+        available, detail = False, str(exc)
+    if not available:
+        fail("destination_unavailable", f"{payload.to_runtime} is not available: {detail}", 409)
+    state["destination_available"] = True
+
+    # --- 3. the destination session, created before the source is archived --------------------
+    run_id = new_id(IdKind.RUN)
+    spec = SessionSpec(
+        agent_id=agent_id,
+        runtime_id=payload.to_runtime,
+        model=payload.model,
+        allowed_tools=list(payload.tools),
+        metadata={
+            "run_id": run_id,
+            "mission_id": mission_id,
+            "capsule_id": stored["capsule_id"],
+            "migrated_from": source_session_id,
+        },
+    )
+    try:
+        session = await target.create_session(spec)
+    except Exception as exc:
+        fail("destination_created", f"the target runtime refused the session: {exc}", 502)
+    state["destination_created"] = True
+    bus.publish(
+        "migration.destination_created",
+        {
+            "migration_id": migration_id,
+            "to_runtime": payload.to_runtime,
+            "to_session": session.session_id,
+            "model": session.detail.get("model"),
+            "provider": session.detail.get("provider"),
+        },
+        method="measured",
+        correlation_id=migration_id,
+        agent_id=agent_id,
+        mission_id=mission_id,
+        session_id=session.session_id,
+        runtime_id=payload.to_runtime,
+    )
+
+    # --- 4. attach the capsule: the canonical structured link, then the text derived from it ---
+    bus.publish(
+        "message.submitted",
+        {
+            "role": "user",
+            "text": capsule.resume_instruction,
+            "chars": len(capsule.resume_instruction),
+            "session_id": session.session_id,
+            "injected": "context_capsule",
+            "capsule_id": stored["capsule_id"],
+        },
+        method="measured",
+        session_id=session.session_id,
+        agent_id=agent_id,
+        mission_id=mission_id,
+        runtime_id=payload.to_runtime,
+    )
+    try:
+        await target.send(session.session_id, Message(role="user", text=capsule.resume_instruction))
+    except Exception as exc:
+        try:
+            await target.close(session.session_id)
+        except Exception:  # pragma: no cover - already gone
+            pass
+        fail("capsule_attached", f"the destination session could not receive the capsule: {exc}", 502)
+    state["capsule_attached"] = True
+    bus.publish(
+        "context.capsule.attached",
+        {
+            "capsule_id": stored["capsule_id"],
+            "source_session_id": source_session_id,
+            "destination_session_id": session.session_id,
+            "agent_id": agent_id,
+            "mission_id": mission_id,
+            "digest": report.digest,
+            "sha256": stored["sha256"],
+            "attachment": "structured",
+            "note": "the canonical link between the capsule and the destination session; the text the runtime receives is derived from this, never the other way round",
+        },
+        method="measured",
+        correlation_id=migration_id,
+        agent_id=agent_id,
+        mission_id=mission_id,
+        session_id=session.session_id,
+        runtime_id=payload.to_runtime,
+    )
+    bus.publish(
+        "migration.capsule_attached",
+        {"migration_id": migration_id, "capsule_id": stored["capsule_id"], "to_session": session.session_id},
+        method="measured",
+        correlation_id=migration_id,
+        agent_id=agent_id,
+        mission_id=mission_id,
+        session_id=session.session_id,
+        runtime_id=payload.to_runtime,
+    )
+
+    # --- 5. archive the source, now that the replacement exists and holds the capsule ---------
+    archived: dict[str, Any] | None = None
+    if leaving:
+        archived = await archive_session(source_session_id, request)
+        state["source_archived"] = True
+        bus.publish(
+            "migration.source_archived",
+            {"migration_id": migration_id, "from_session": source_session_id, "runtime_closed": archived.get("runtime_closed")},
+            method="measured",
+            correlation_id=migration_id,
+            agent_id=agent_id,
+            mission_id=mission_id,
+            session_id=source_session_id,
+            runtime_id=from_runtime,
         )
 
-    # 2. archive what is being left
-    archived = None
-    if leaving:
-        archived = await archive_session(leaving["id"], request)
-
-    # 3. the same agent, a new version
+    # --- 6. the same agent, a new version ------------------------------------------------------
     current = store.rows("SELECT COALESCE(MAX(version), 0) AS v FROM agent_versions WHERE agent_id = ?", (agent_id,))
     version = int(current[0]["v"] if current else 0) + 1
     bus.publish(
@@ -703,72 +935,79 @@ async def migrate_agent(agent_id: str, payload: MigrateIn, request: Request) -> 
             "capsule_id": stored["capsule_id"],
         },
         method="measured",
+        correlation_id=migration_id,
         agent_id=agent_id,
     )
 
-    # 4. the new session, with the capsule injected as its first message
-    run_id = new_id(IdKind.RUN)
-    spec = SessionSpec(
-        agent_id=agent_id,
-        runtime_id=payload.to_runtime,
-        model=payload.model,
-        allowed_tools=list(payload.tools),
-        metadata={
-            "run_id": run_id,
-            "mission_id": mission_id,
-            "capsule_id": stored["capsule_id"],
-            "migrated_from": leaving["id"] if leaving else None,
-        },
-    )
-    try:
-        session = await target.create_session(spec)
-        bus.publish(
-            "message.submitted",
-            {
-                "role": "user",
-                "text": draft.capsule.resume_instruction,
-                "chars": len(draft.capsule.resume_instruction),
-                "session_id": session.session_id,
-                "injected": "context_capsule",
-                "capsule_id": stored["capsule_id"],
-            },
-            method="measured",
-            session_id=session.session_id,
-            agent_id=agent_id,
-            mission_id=mission_id,
-            runtime_id=payload.to_runtime,
-        )
-        await target.send(session.session_id, Message(role="user", text=draft.capsule.resume_instruction))
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"the target runtime refused the session: {exc}") from exc
-
+    state["completed"] = True
     bus.publish(
-        "runtime.migrated",
+        "migration.completed",
         {
+            "migration_id": migration_id,
             "agent_id": agent_id,
+            "mission_id": mission_id,
             "from_runtime": from_runtime,
             "to_runtime": payload.to_runtime,
-            "from_session": leaving["id"] if leaving else None,
+            "from_session": source_session_id,
             "to_session": session.session_id,
             "capsule_id": stored["capsule_id"],
-            "capsule_verified": True,
+            "digest": report.digest,
             "version": version,
-            "injected": "the capsule's resume instruction was sent as the first message",
+            "state": state,
         },
         method="measured",
+        correlation_id=migration_id,
         agent_id=agent_id,
         mission_id=mission_id,
         session_id=session.session_id,
         runtime_id=payload.to_runtime,
     )
     return {
+        "migration_id": migration_id,
         "agent_id": agent_id,
         "version": version,
         "from_runtime": from_runtime,
         "to_runtime": payload.to_runtime,
-        "from_session": leaving["id"] if leaving else None,
+        "from_session": source_session_id,
         "to_session": session.session_id,
         "archived": archived,
         "capsule": stored,
+        "state": state,
         "runtime_session": session.model_dump(mode="json"),
+    }
+
+
+@router.get("/v1/migrations")
+def list_migrations(request: Request, agent_id: str | None = None, state: str | None = None) -> dict[str, Any]:
+    """The folded lifecycle of every migration attempt, including the ones that failed."""
+    store = _store(request)
+    sql = "SELECT * FROM migrations"
+    where: list[str] = []
+    params: list[Any] = []
+    if agent_id:
+        where.append("agent_id = ?")
+        params.append(agent_id)
+    if state:
+        where.append("state LIKE ?")
+        params.append(f"{state}%")
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY created_ts DESC"
+    return {"migrations": store.rows(sql, params), "count": len(store.rows(sql, params))}
+
+
+@router.get("/v1/migrations/{migration_id}")
+def get_migration(migration_id: str, request: Request) -> dict[str, Any]:
+    """One attempt, with the events that made it up: a partial migration must be inspectable."""
+    store = _store(request)
+    rows = store.rows("SELECT * FROM migrations WHERE id = ?", (migration_id,))
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"unknown migration {migration_id}")
+    events = store.events(correlation_id=migration_id)
+    return {
+        "migration": rows[0],
+        "events": [
+            {"seq": event.seq, "kind": event.kind, "ts": event.ts, "payload": event.payload_body}
+            for event in events
+        ],
     }

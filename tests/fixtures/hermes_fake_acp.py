@@ -54,6 +54,7 @@ def main() -> int:
     parser.add_argument("--hang", action="store_true")
     parser.add_argument("--garbage", action="store_true")
     parser.add_argument("--fail-initialize", action="store_true")
+    parser.add_argument("--fail-session-new", action="store_true")
     parser.add_argument("--session-id", default="1b0d029a-cdfe-4dbf-aafc-55d86a2f9dc1")
     parser.add_argument("--model", default="openai-codex:gpt-6.1-sol")
     parser.add_argument("--other-model", default="opencode-go:deepseek-v4.1-flash")
@@ -102,6 +103,9 @@ def main() -> int:
             continue
 
         if method == "session/new":
+            if args.fail_session_new:
+                fail(request_id, -32603, "session/new refused by the scripted peer")
+                continue
             respond(
                 request_id,
                 {

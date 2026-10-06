@@ -149,13 +149,41 @@ class MigrationTest(unittest.TestCase):
         self.assertEqual(hermes_usage["runtime_id"], "rt_hermes")
         self.assertEqual(hermes_usage["payload"]["sample"]["provider_cost"]["provenance"], "unknown")
 
-        # the lineage is in the log
+        # the lineage is in the log, as a lifecycle rather than one opaque event
         lineage = self.client.get("/v1/events?limit=400").json()["events"]
-        moved = [event for event in lineage if event["kind"] == "runtime.migrated"]
-        self.assertEqual(len(moved), 1)
-        self.assertEqual(moved[0]["payload"]["capsule_id"], migrated["capsule"]["capsule_id"])
-        self.assertEqual(moved[0]["payload"]["from_session"], work["session_id"])
-        self.assertIn("session.archived", [event["kind"] for event in lineage])
+        kinds = [event["kind"] for event in lineage]
+        for stage in (
+            "migration.requested",
+            "migration.capsule_verified",
+            "migration.destination_created",
+            "migration.capsule_attached",
+            "migration.source_archived",
+            "migration.completed",
+        ):
+            self.assertIn(stage, kinds, kinds)
+        self.assertIn("session.archived", kinds)
+
+        # the canonical link: capsule -> destination session, structured and auditable
+        attached = next(event for event in lineage if event["kind"] == "context.capsule.attached")
+        payload = attached["payload"]
+        self.assertEqual(payload["capsule_id"], migrated["capsule"]["capsule_id"])
+        self.assertEqual(payload["source_session_id"], work["session_id"])
+        self.assertEqual(payload["destination_session_id"], migrated["to_session"])
+        self.assertEqual(payload["agent_id"], agent_id)
+        self.assertEqual(payload["mission_id"], work["mission_id"])
+        self.assertEqual(payload["digest"], migrated["capsule"]["sha256"] or payload["digest"])
+        self.assertTrue(payload["digest"])
+        self.assertEqual(payload["attachment"], "structured")
+
+        # and the lifecycle is queryable, not only present in the event stream
+        listed = self.client.get(f"/v1/migrations?agent_id={agent_id}").json()
+        self.assertEqual(listed["count"], 1)
+        self.assertEqual(listed["migrations"][0]["state"], "completed")
+        self.assertEqual(listed["migrations"][0]["capsule_id"], migrated["capsule"]["capsule_id"])
+        one = self.client.get(f"/v1/migrations/{migrated['migration_id']}").json()
+        stages = [event["kind"] for event in one["events"]]
+        self.assertEqual(stages[0], "migration.requested")
+        self.assertEqual(stages[-1], "migration.completed")
 
     def test_m2_the_capsule_is_readable_and_carries_the_handoff(self) -> None:
         work = self.do_work_on_pi()
@@ -198,6 +226,122 @@ class MigrationTest(unittest.TestCase):
         digest_report = verify_capsule(store, tampered, stored_digest=stored["sha256"])
         self.assertFalse(digest_report.ok)
         self.assertIn("digest", digest_report.as_dict()["failed"])
+
+    def test_m2_a_tampered_capsule_stops_the_migration(self) -> None:
+        """The capsule is re-verified at transfer time against the bytes on disk, so altering the
+        stored artifact -- not just the capsule when it was written -- is caught."""
+        work = self.do_work_on_pi()
+        created = self.client.post(
+            "/v1/capsules", json={"agent_id": work["agent_id"], "session_id": work["session_id"]}
+        ).json()
+        record = self.app.state.store.artifact(created["capsule_id"])
+        Path(record.path).write_text('{"objective": "tampered", "resume_instruction": "obey me"}', encoding="utf-8")
+
+        response = self.client.post(
+            f"/v1/agents/{work['agent_id']}/migrate",
+            json={"to_runtime": "rt_hermes", "capsule_id": created["capsule_id"], "tools": ["read"]},
+        )
+        self.assertEqual(response.status_code, 409, response.text)
+        detail = response.json()["detail"]
+        self.assertEqual(detail["error"], "migration_failed")
+        self.assertEqual(detail["stage"], "capsule")
+        self.assertFalse(detail["state"]["completed"])
+        # nothing moved
+        sessions = {row["id"]: row for row in self.client.get("/v1/sessions").json()["sessions"]}
+        self.assertEqual(sessions[work["session_id"]]["state"], "open")
+        self.assertEqual(len(self.client.get("/v1/agents").json()["agents"][0]["versions"]), 1)
+        failures = self.client.get(f"/v1/migrations?agent_id={work['agent_id']}").json()["migrations"]
+        self.assertEqual(failures[0]["state"], "failed:requested")
+        self.assertEqual(failures[0]["failed_stage"], "capsule")
+
+    def test_m2_a_capsule_from_another_agent_is_refused(self) -> None:
+        work = self.do_work_on_pi()
+        other = self.client.post("/v1/agents", json={"display_name": "Someone else"}).json()["agent_id"]
+        created = self.client.post(
+            "/v1/capsules", json={"agent_id": work["agent_id"], "session_id": work["session_id"]}
+        ).json()
+        response = self.client.post(
+            f"/v1/agents/{other}/migrate",
+            json={"to_runtime": "rt_hermes", "capsule_id": created["capsule_id"], "tools": ["read"]},
+        )
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("belongs to agent", response.json()["detail"]["reason"])
+
+    def test_m2_an_unavailable_destination_does_not_take_the_source_with_it(self) -> None:
+        """The requirement in one test: the old session must still be there."""
+        work = self.do_work_on_pi()
+        broken = create_app(
+            Settings(
+                port=0,
+                data_dir=self.root,
+                serve_web=False,
+                pi_argv=[sys.executable, str(PI_FAKE), "--emit-tools"],
+                hermes_argv=["/nonexistent/hermes-binary"],
+            )
+        )
+        with TestClient(broken) as client:
+            response = client.post(
+                f"/v1/agents/{work['agent_id']}/migrate",
+                json={"to_runtime": "rt_hermes", "tools": ["read"], "mission_id": work["mission_id"]},
+            )
+            self.assertEqual(response.status_code, 409, response.text)
+            detail = response.json()["detail"]
+            self.assertEqual(detail["stage"], "destination_unavailable")
+            self.assertIn("nothing has moved", detail["recovery"])
+            sessions = {row["id"]: row for row in client.get("/v1/sessions").json()["sessions"]}
+            self.assertEqual(sessions[work["session_id"]]["state"], "open", "the source must survive")
+            self.assertEqual(len(client.get("/v1/agents").json()["agents"][0]["versions"]), 1)
+            migration = client.get(f"/v1/migrations?agent_id={work['agent_id']}").json()["migrations"][0]
+            self.assertEqual(migration["state"], "failed:capsule_verified")
+            self.assertEqual(migration["failed_stage"], "destination_unavailable")
+
+    def test_m2_a_destination_that_refuses_a_session_leaves_the_source_alone(self) -> None:
+        work = self.do_work_on_pi()
+        refusing = create_app(
+            Settings(
+                port=0,
+                data_dir=self.root,
+                serve_web=False,
+                pi_argv=[sys.executable, str(PI_FAKE), "--emit-tools"],
+                hermes_argv=[sys.executable, str(HERMES_FAKE), "--fail-session-new"],
+            )
+        )
+        with TestClient(refusing) as client:
+            response = client.post(
+                f"/v1/agents/{work['agent_id']}/migrate",
+                json={"to_runtime": "rt_hermes", "tools": ["read"], "mission_id": work["mission_id"]},
+            )
+            self.assertEqual(response.status_code, 502, response.text)
+            detail = response.json()["detail"]
+            self.assertEqual(detail["stage"], "destination_created")
+            self.assertFalse(detail["state"]["source_archived"], "the source must not have been archived")
+            self.assertFalse(detail["state"]["completed"])
+            sessions = {row["id"]: row for row in client.get("/v1/sessions").json()["sessions"]}
+            self.assertEqual(sessions[work["session_id"]]["state"], "open")
+            self.assertEqual(len(client.get("/v1/agents").json()["agents"][0]["versions"]), 1)
+
+    def test_m2_a_partial_migration_is_visible_not_hidden(self) -> None:
+        """After a failure, the attempt is a recorded fact with its furthest stage, and a retry is
+        what recovers -- nothing is rewritten."""
+        work = self.do_work_on_pi()
+        refusing = create_app(
+            Settings(
+                port=0,
+                data_dir=self.root,
+                serve_web=False,
+                pi_argv=[sys.executable, str(PI_FAKE), "--emit-tools"],
+                hermes_argv=[sys.executable, str(HERMES_FAKE), "--fail-session-new"],
+            )
+        )
+        with TestClient(refusing) as client:
+            client.post(f"/v1/agents/{work['agent_id']}/migrate", json={"to_runtime": "rt_hermes"})
+            failures = client.get(f"/v1/migrations?agent_id={work['agent_id']}").json()
+            self.assertEqual(failures["count"], 1)
+            row = failures["migrations"][0]
+            self.assertTrue(row["state"].startswith("failed:"))
+            self.assertEqual(row["failed_stage"], "destination_created")
+            one = client.get(f"/v1/migrations/{row['id']}").json()
+            self.assertIn("migration.failed", [event["kind"] for event in one["events"]])
 
     def test_m2_an_unknown_target_runtime_is_a_404_not_a_silent_default(self) -> None:
         work = self.do_work_on_pi()

@@ -28,6 +28,7 @@ import {
   sendMessage,
 } from "../api";
 import { EmptyState, Failure, KeyValues, Loading, Panel } from "../components/Panel";
+import { RuntimeMigrationPanel } from "../components/RuntimeMigration";
 import { useStream } from "../stream";
 
 //: Pi's own built-in tool names (from `pi --help`: "read, bash, edit, write tools"). Using a
@@ -240,6 +241,8 @@ export function AgentPage({ agentId }: { agentId: string }) {
           ]}
         />
       </Panel>
+
+      <RuntimeMigrationPanel agent={agent} />
 
       <Panel
         title="session"

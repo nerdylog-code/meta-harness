@@ -232,6 +232,74 @@ export const createSession = (agentId: string, missionId: string | null, tools: 
 export const sendMessage = (sessionId: string, text: string) =>
   postJson<{ accepted: boolean }>(`/v1/sessions/${encodeURIComponent(sessionId)}/messages`, { text });
 
+export interface MigrationRow {
+  id: string;
+  agent_id: string | null;
+  mission_id: string | null;
+  from_runtime: string | null;
+  to_runtime: string | null;
+  from_session: string | null;
+  to_session: string | null;
+  capsule_id: string | null;
+  digest: string | null;
+  state: string;
+  failed_stage: string | null;
+  reason: string | null;
+  created_ts: number;
+}
+
+export interface CapsuleRow {
+  id: string;
+  agent_id: string | null;
+  mission_id: string | null;
+  session_id: string | null;
+  runtime_id: string | null;
+  phase: string;
+  objective: string;
+  sha256: string;
+  size: number;
+  verified: boolean;
+  created_ts: number;
+}
+
+export interface RuntimesPayload {
+  runtimes: Array<{
+    runtime_id: string;
+    is_default: boolean;
+    available: boolean;
+    name?: string | null;
+    version?: string | null;
+    protocol?: string | null;
+    detail?: string | null;
+  }>;
+}
+
+export const fetchRuntimes = () => getJson<RuntimesPayload>("/v1/runtimes");
+export const fetchMigrations = (agentId?: string) =>
+  getJson<{ migrations: MigrationRow[]; count: number }>(
+    agentId ? `/v1/migrations?agent_id=${encodeURIComponent(agentId)}` : "/v1/migrations",
+  );
+export const fetchCapsules = (agentId?: string) =>
+  getJson<{ capsules: CapsuleRow[]; count: number }>(
+    agentId ? `/v1/capsules?agent_id=${encodeURIComponent(agentId)}` : "/v1/capsules",
+  );
+
+export const migrateAgent = (agentId: string, toRuntime: string, model: string | null = null) =>
+  postJson<{
+    migration_id: string;
+    agent_id: string;
+    version: number;
+    from_runtime: string | null;
+    to_runtime: string;
+    from_session: string | null;
+    to_session: string;
+    state: Record<string, boolean>;
+  }>(`/v1/agents/${encodeURIComponent(agentId)}/migrate`, {
+    to_runtime: toRuntime,
+    model,
+    tools: ["read"],
+  });
+
 export const cancelSession = (sessionId: string) =>
   postJson<{ cancelled: boolean; orphans_left: boolean | null }>(
     `/v1/sessions/${encodeURIComponent(sessionId)}/cancel`,

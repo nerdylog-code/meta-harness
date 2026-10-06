@@ -122,7 +122,11 @@ class HermesRuntimeAdapter:
         env: dict[str, str] | None = None,
         supervisor: ProcessSupervisor | None = None,
         on_event: Callable[[CanonicalEvent, bool], None] | None = None,
-        response_timeout_s: float = 120.0,
+        # A turn's duration belongs to the runtime, not to us: a real Hermes turn that consumed a
+        # capsule made 23 tool calls and was still working at 120s, which is when the first
+        # end-to-end run killed it with this timeout. This is a safety net against a hung process,
+        # not a policy about how long thinking may take.
+        response_timeout_s: float = 900.0,
         probe_timeout_s: float = 60.0,
     ) -> None:
         self.argv = list(argv or DEFAULT_ARGV)

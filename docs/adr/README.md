@@ -33,6 +33,7 @@ Numbering policy: **numbers reserved by PROJECT_BOOK §Appendix A are kept for t
 | Pi transport: structured RPC (`pi --mode rpc`), no ANSI scraping | `ADR-0014` (rule) + v1 ADR-0006 (prior art) — the Pi-specific adapter contract arrives with WP-003 |
 | Dashboard tab retired (`tab.hidden`), REST door kept | `V1_INVENTORY.md` D3 disposition |
 | Desktop shell = a window plus a Python host; the renderer is granted no capability and receives no secret | `ADR-0009` (WP-007) + `docs/architecture/PACKAGING.md` |
+| The Context Capsule is the migration transfer object; the text handed to the runtime is derived from it | `ADR-0018` (M2) + `docs/protocols/HERMES_ACP.md` |
 
 ## Open architectural questions (real blockers, not preferences)
 

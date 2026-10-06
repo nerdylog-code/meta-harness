@@ -242,3 +242,83 @@ class CapsulesProjection:
             ),
         )
         return True
+
+
+class MigrationsProjection:
+    """Runtime migrations, folded from their lifecycle events (M2).
+
+    A migration is not atomic, so its state is the furthest stage it reached and `failed_stage`
+    says where it stopped. A partial migration is recorded, never hidden: the row exists so an
+    operator (or the UI) can see that an attempt did not finish, and the recovery is another
+    attempt -- the log is append-only, and there is nothing to clean up.
+    """
+
+    name = "migrations"
+    tables: tuple[str, ...] = ("migrations",)
+
+    #: state <- event kind. Order is the lifecycle order, and it is meaningful.
+    STATE_BY_KIND = {
+        "migration.requested": "requested",
+        "migration.capsule_verified": "capsule_verified",
+        "migration.destination_created": "destination_created",
+        "migration.capsule_attached": "capsule_attached",
+        "migration.source_archived": "source_archived",
+        "migration.completed": "completed",
+        "migration.failed": "failed",
+    }
+
+    def apply(self, conn: sqlite3.Connection, event: CanonicalEvent) -> bool:
+        if event.kind not in self.STATE_BY_KIND:
+            return False
+        body = event.payload_body
+        # The migration id is the envelope's correlation id: one operation, many events.
+        migration_id = event.correlation_id or body.get("migration_id")
+        if not migration_id:
+            raise ValueError(f"{event.kind} must carry a migration id (correlation_id)")
+        state = self.STATE_BY_KIND[event.kind]
+        if event.kind == "migration.failed":
+            # A failed attempt keeps the furthest stage it had reached; the row must not imply the
+            # migration went back to the beginning.
+            existing = conn.execute("SELECT state FROM migrations WHERE id = ?", (migration_id,)).fetchone()
+            reached = existing[0] if existing and existing[0] != "failed" else state
+            state = f"failed:{reached}"
+        conn.execute(
+            """
+            INSERT INTO migrations (
+                id, agent_id, mission_id, from_runtime, to_runtime, from_session, to_session,
+                capsule_id, digest, state, failed_stage, reason, created_ts, updated_ts, last_seq
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                agent_id     = COALESCE(excluded.agent_id, migrations.agent_id),
+                mission_id   = COALESCE(excluded.mission_id, migrations.mission_id),
+                from_runtime = COALESCE(excluded.from_runtime, migrations.from_runtime),
+                to_runtime   = COALESCE(excluded.to_runtime, migrations.to_runtime),
+                from_session = COALESCE(excluded.from_session, migrations.from_session),
+                to_session   = COALESCE(excluded.to_session, migrations.to_session),
+                capsule_id   = COALESCE(excluded.capsule_id, migrations.capsule_id),
+                digest       = COALESCE(excluded.digest, migrations.digest),
+                state        = excluded.state,
+                failed_stage = COALESCE(excluded.failed_stage, migrations.failed_stage),
+                reason       = COALESCE(excluded.reason, migrations.reason),
+                updated_ts   = excluded.updated_ts,
+                last_seq     = excluded.last_seq
+            """,
+            (
+                str(migration_id),
+                event.agent_id or body.get("agent_id"),
+                event.mission_id or body.get("mission_id"),
+                body.get("from_runtime"),
+                body.get("to_runtime"),
+                body.get("from_session"),
+                body.get("to_session"),
+                body.get("capsule_id"),
+                body.get("digest") or body.get("sha256"),
+                state,
+                body.get("stage") if event.kind == "migration.failed" else None,
+                body.get("reason"),
+                event.ts,
+                event.ts,
+                event.seq,
+            ),
+        )
+        return True
