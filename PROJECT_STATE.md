@@ -17,7 +17,8 @@ agent *Nova*, a Pi session on provider `opencode-go` / model `kimi-k3`, a real `
 its events and its `provider_reported` usage in the canonical store, a proven cancel with no
 surviving process, and then a daemon restart after which Nova, the mission, the session history
 and every event are still there. `scripts/e2e_m1.py` is the proof, run by hand because it needs
-the binary, a provider and real credit. WP-015 → WP-020 are done; 292 tests green locally and the
+the binary, a provider and real credit. WP-015 → WP-020 are done; **281 tests green locally**
+(v1 21, unit 34, contracts 113, store 57, integration 17, replay 21, conformance 18) and the
 CI matrix is green on `ubuntu-latest` and `windows-latest`.
 `master` and the tag `v0.1-hermes-hosted` are untouched.
 
@@ -53,7 +54,7 @@ CI matrix is green on `ubuntu-latest` and `windows-latest`.
 - **Scripts**: `python scripts/dev.py | test.py | doctor.py | package.py` — no Bash, no `shell=True`, works from PowerShell and POSIX.
 - **Canonical store** `apps/daemon/metaharness/store` (WP-004): SQLite WAL, three numbered migrations, `BEGIN IMMEDIATE` per append, `seq` assigned inside the transaction and gap-free, append-only enforced by triggers, idempotent by event id, content-addressed artifacts with no blob column, JSONL export that is derived only. One call proves replay: `uv run python -c "import asyncio, metaharness.store as s; print(asyncio.run(s.replay_equivalence_check()))"`.
 - **Boot reconciliation** `apps/daemon/metaharness/reconcile`: reads persisted state, asks a `ProcessProbe`, appends `run.interrupted` with `orphaned=true`, and never resumes work. Deliberately outside the store.
-- **Tests**: v1 regression 21/21 · v2 unit 27/27 · contracts 113/113 · **store 54/54** · integration 16/16 · **replay 21/21** (real server, real websockets, real process trees, real hard kills; the whole default run is ~80 s).
+- **Tests**: v1 regression 21/21 · unit 34/34 · contracts 113/113 · store 57/57 · integration 17/17 · replay 21/21 · **conformance 18/18 (1 skip, by design)** — 281 measured by `scripts/test.py`, which is the only number to trust: earlier notes in this file quoted a total that was never counted, and this one was read off the runner's own output. The suites exercise a real server, real websockets, real process trees and real hard kills; the whole default run is ~2 min.
 - **ProcessSupervisor** `apps/daemon/metaharness/process`: one interface, two OS implementations, pre-signal tree snapshot, verified kill (`orphan_check` inside the emitted event), bounded streams, wall-timeout budget. Design and the orphan bug it fixed: `docs/architecture/PROCESS_SUPERVISION.md`.
 - **Web shell** `apps/web` (WP-006): Vite + React + TS + TanStack Query + TanStack Router (code-based routes), one websocket owned by a context provider, connection state that distinguishes live from degraded from connecting, an event inspector that always says whether it is showing the live socket or the durable backlog, and a sidebar that marks unbuilt surfaces as `soon` instead of linking to nowhere. Built bundle is served by the daemon with an SPA fallback; deep links work and path traversal is refused (403, verified with `curl --path-as-is`). DOM verified in headless Chromium: the shell renders, the badge reads `live`, and the log's events appear.
 - **CI** `.github/workflows/ci.yml`: matrix `ubuntu-latest` + `windows-latest`, six suites (v1, unit, contracts, store, integration, replay), plus a web job gated on `apps/web/package.json`.
