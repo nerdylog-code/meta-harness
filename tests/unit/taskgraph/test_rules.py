@@ -22,6 +22,13 @@ from metaharness_contracts.taskgraph import (  # noqa: E402
     is_ready,
     missing_dependencies,
     ready_ids,
+    LANES,
+    TERMINAL_LANES,
+    TaskGraphError,
+    board_lane,
+    dependency_blockers,
+    effective_lane,
+    waves,
 )
 
 
@@ -95,3 +102,92 @@ class ReadinessTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BoardPlacementTest(unittest.TestCase):
+    """Where a task lands on a board, and why that is not a matter of opinion."""
+
+    def test_every_canonical_state_has_a_lane(self) -> None:
+        """Totality: a new task state cannot silently fall off the board."""
+        for state in TaskState:
+            lane = board_lane(state)
+            self.assertIn(lane, [*LANES, *TERMINAL_LANES], f"{state} maps outside the board")
+
+    def test_the_mapping_is_the_documented_one(self) -> None:
+        self.assertEqual(board_lane(TaskState.DRAFT), "BACKLOG")
+        self.assertEqual(board_lane(TaskState.READY), "READY")
+        self.assertEqual(board_lane(TaskState.CLAIMED), "READY", "the claim is already visible on the card")
+        self.assertEqual(board_lane(TaskState.RUNNING), "RUNNING")
+        self.assertEqual(board_lane(TaskState.WAITING), "WAITING")
+        self.assertEqual(board_lane(TaskState.REVIEW), "REVIEW")
+        self.assertEqual(board_lane(TaskState.BLOCKED), "BLOCKED")
+        self.assertEqual(board_lane(TaskState.DONE), "DONE")
+        self.assertEqual(board_lane(TaskState.FAILED), "FAILED")
+        self.assertEqual(board_lane(TaskState.CANCELLED), "CANCELLED")
+
+    def test_failed_and_cancelled_are_never_folded_into_done(self) -> None:
+        self.assertNotEqual(board_lane(TaskState.FAILED), "DONE")
+        self.assertNotEqual(board_lane(TaskState.CANCELLED), "DONE")
+        self.assertIn("FAILED", TERMINAL_LANES)
+        self.assertIn("CANCELLED", TERMINAL_LANES)
+
+    def test_a_ready_task_with_unsatisfied_dependencies_is_not_ready(self) -> None:
+        """The board must not offer work the daemon would refuse to start."""
+        states = {"A": TaskState.RUNNING, "B": TaskState.READY}
+        deps = {"A": [], "B": ["A"]}
+        self.assertEqual(effective_lane("B", states["B"], states, deps), "WAITING")
+
+    def test_a_ready_task_whose_dependency_failed_is_blocked(self) -> None:
+        states = {"A": TaskState.FAILED, "B": TaskState.READY}
+        deps = {"A": [], "B": ["A"]}
+        self.assertEqual(effective_lane("B", states["B"], states, deps), "BLOCKED")
+
+    def test_dependencies_satisfied_means_ready(self) -> None:
+        states = {"A": TaskState.DONE, "B": TaskState.READY}
+        deps = {"A": [], "B": ["A"]}
+        self.assertEqual(effective_lane("B", states["B"], states, deps), "READY")
+
+    def test_the_fold_does_not_move_a_task_that_is_already_running(self) -> None:
+        states = {"A": TaskState.DRAFT, "B": TaskState.RUNNING}
+        deps = {"A": [], "B": ["A"]}
+        self.assertEqual(effective_lane("B", states["B"], states, deps), "RUNNING")
+
+
+class WavesTest(unittest.TestCase):
+    def test_the_diamond_lays_out_in_three_waves(self) -> None:
+        deps = {"A": [], "B": ["A"], "C": ["A"], "D": ["B", "C"]}
+        self.assertEqual(waves(deps), [["A"], ["B", "C"], ["D"]])
+
+    def test_waves_are_deterministic_regardless_of_insertion_order(self) -> None:
+        one = {"A": [], "B": ["A"], "C": ["A"], "D": ["B", "C"]}
+        two = {"D": ["B", "C"], "C": ["A"], "B": ["A"], "A": []}
+        self.assertEqual(waves(one), waves(two))
+
+    def test_a_deeper_chain_keeps_its_depth(self) -> None:
+        deps = {"A": [], "B": ["A"], "C": ["B"], "D": ["C"]}
+        self.assertEqual(waves(deps), [["A"], ["B"], ["C"], ["D"]])
+
+    def test_a_dependency_outside_the_graph_is_not_a_wave(self) -> None:
+        deps = {"A": [], "B": ["A", "tsk_elsewhere"]}
+        self.assertEqual(waves(deps), [["A"], ["B"]])
+
+    def test_an_empty_graph_has_no_waves(self) -> None:
+        self.assertEqual(waves({}), [])
+
+    def test_a_cycle_is_refused_rather_than_laid_out(self) -> None:
+        with self.assertRaises(TaskGraphError):
+            waves({"A": ["B"], "B": ["A"]})
+
+
+class DependencyExplanationTest(unittest.TestCase):
+    def test_waiting_and_dead_are_different_sentences(self) -> None:
+        states = {"B": TaskState.RUNNING, "C": TaskState.FAILED}
+        deps = {"D": ["B", "C"]}
+        explanation = dependency_blockers("D", states, deps)
+        self.assertEqual(explanation["waiting_on"], ["B"])
+        self.assertEqual(explanation["dead"], ["C"])
+
+    def test_a_missing_dependency_is_unsatisfied_never_satisfied(self) -> None:
+        explanation = dependency_blockers("D", {}, {"D": ["tsk_gone"]})
+        self.assertEqual(explanation["waiting_on"], ["tsk_gone"])
+        self.assertEqual(explanation["dead"], [])

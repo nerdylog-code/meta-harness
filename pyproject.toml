@@ -36,3 +36,8 @@ venvPath = "."
 venv = ".venv"
 include = ["apps/daemon", "packages/contracts", "tests", "scripts"]
 exclude = ["**/__pycache__", "apps/web/node_modules"]
+
+[dependency-groups]
+dev = [
+    "playwright>=1.63.0",
+]

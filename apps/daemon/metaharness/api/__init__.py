@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from .agents import router as agents_router
 from .artifacts import router as artifacts_router
+from .board import router as board_router
 from .approvals import router as approvals_router
 from .tasks import router as tasks_router
 from .workspaces import router as workspaces_router
 
-__all__ = ["agents_router", "approvals_router", "artifacts_router", "tasks_router", "workspaces_router"]
+__all__ = ["agents_router", "approvals_router", "artifacts_router", "board_router", "tasks_router", "workspaces_router"]

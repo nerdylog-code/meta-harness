@@ -115,6 +115,24 @@ from .runtime import (
     SessionSpec,
 )
 from .serialization import NotJsonSafe, dumps, external_envelope, json_safe, round_trip
+from .taskgraph import (
+    DEAD_STATES,
+    LANES,
+    LANE_OF_STATE,
+    SATISFIED_STATES,
+    STARTABLE_STATES,
+    TERMINAL_LANES,
+    TaskGraphError,
+    blocked_ids,
+    board_lane,
+    dependency_blockers,
+    effective_lane,
+    find_cycle,
+    is_ready,
+    missing_dependencies,
+    ready_ids,
+    waves,
+)
 from .usage import Metric, UsageSample
 from .workspace import (
     DEFAULT_ISOLATING_POLICY,

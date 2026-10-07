@@ -82,6 +82,10 @@ class ApprovalIn(BaseModel):
     reversibility: str = "reversible"
     requested_by: str
     ttl_s: float | None = None
+    #: Optional scope. Without it an approval is about nothing in particular, which is honest but
+    #: useless to a board -- so the caller may name the mission and task it belongs to.
+    task_id: str | None = None
+    mission_id: str | None = None
 
 
 class GrantIn(BaseModel):
@@ -163,8 +167,22 @@ def _view(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _publish(request: Request, kind: str, payload: dict[str, Any], *, approval_id: str) -> None:
-    request.app.state.bus.publish(kind, {"approval_id": approval_id, **payload}, method="measured")
+def _publish(
+    request: Request,
+    kind: str,
+    payload: dict[str, Any],
+    *,
+    approval_id: str,
+    task_id: str | None = None,
+    mission_id: str | None = None,
+) -> None:
+    request.app.state.bus.publish(
+        kind,
+        {"approval_id": approval_id, **payload},
+        method="measured",
+        task_id=task_id,
+        mission_id=mission_id,
+    )
 
 
 # --------------------------------------------------------------------------------- endpoints
@@ -221,6 +239,23 @@ def request_approval(payload: ApprovalIn, request: Request) -> dict[str, Any]:
             status_code=422, detail=f"{risk.value} requires a human summary of what is being authorised"
         )
 
+    # The scope is checked against the log rather than taken on trust: a task must exist, and a
+    # mission named alongside it must be the mission that task actually belongs to.
+    mission_id = payload.mission_id
+    if payload.task_id:
+        task_rows = store.rows("SELECT id, mission_id FROM tasks WHERE id = ?", (payload.task_id,))
+        if not task_rows:
+            raise HTTPException(status_code=404, detail=f"no such task: {payload.task_id}")
+        if mission_id and mission_id != task_rows[0]["mission_id"]:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"task {payload.task_id} belongs to mission {task_rows[0]['mission_id']}, "
+                    f"not {mission_id}"
+                ),
+            )
+        mission_id = task_rows[0]["mission_id"]
+
     approval_id = new_id(IdKind.APPROVAL)
     ttl = payload.ttl_s if payload.ttl_s is not None else APPROVAL_TTL_S
     model = ApprovalRequest(
@@ -249,6 +284,8 @@ def request_approval(payload: ApprovalIn, request: Request) -> dict[str, Any]:
             "expires_at": model.expires_at,
         },
         approval_id=approval_id,
+            task_id=payload.task_id,
+            mission_id=mission_id,
     )
     return _view(_row_or_404(store, approval_id))
 

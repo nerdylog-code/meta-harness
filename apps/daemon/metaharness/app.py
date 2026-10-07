@@ -42,6 +42,7 @@ from .api import (
     agents_router,
     approvals_router,
     artifacts_router,
+    board_router,
     tasks_router,
     workspaces_router,
 )
@@ -347,6 +348,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(approvals_router)
     app.include_router(artifacts_router)
     app.include_router(workspaces_router)
+    app.include_router(board_router)
 
     web_root = settings.resolved_web_root()
     if web_root is not None:

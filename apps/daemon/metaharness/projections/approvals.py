@@ -52,9 +52,10 @@ class ApprovalsProjection:
                 """
                 INSERT INTO approvals (
                     id, action_type, action_payload, action_payload_hash, risk_level, human_summary,
-                    reversibility, requested_by, requested_ts, expires_at, state, last_seq
+                    reversibility, requested_by, requested_ts, expires_at, state, last_seq,
+                    mission_id, task_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
                 """,
                 (
                     str(approval_id),
@@ -68,6 +69,10 @@ class ApprovalsProjection:
                     event.ts,
                     body.get("expires_at"),
                     event.seq,
+                    # The scope comes from the canonical envelope, not from parsing the action
+                    # payload: the log already says which mission and task this approval is about.
+                    event.mission_id,
+                    event.task_id,
                 ),
             )
             return True

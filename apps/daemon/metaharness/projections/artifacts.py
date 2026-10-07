@@ -36,8 +36,10 @@ class ArtifactsProjection:
 
         conn.execute(
             """
-            INSERT INTO artifacts (id, path, sha256, mime, size, metadata, origin, created_ts, seq)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO artifacts (
+                id, path, sha256, mime, size, metadata, origin, created_ts, seq, mission_id, task_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 path = excluded.path,
                 sha256 = excluded.sha256,
@@ -54,6 +56,9 @@ class ArtifactsProjection:
                 json.dumps(body.get("origin") or {}, sort_keys=True, ensure_ascii=False),
                 event.ts,
                 event.seq,
+                # From the canonical envelope: the log already says which task produced this.
+                event.mission_id,
+                event.task_id,
             ),
         )
         return True
