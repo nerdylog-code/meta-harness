@@ -485,6 +485,15 @@ export interface WorkboardTask {
   };
   artifacts: { count: number; recorded: number; proof: number; ids: string[] };
   usage: { sample: Record<string, unknown>; sampled_at: number } | null;
+  enforcement: {
+    write_isolation: string;
+    write_isolation_scope: string;
+    write_isolation_detail: string;
+    filesystem_isolation: string;
+    filesystem_isolation_scope: string;
+    filesystem_isolation_detail: string;
+    note: string;
+  };
   reasons: string[];
   wave: number | null;
   created_at: number;

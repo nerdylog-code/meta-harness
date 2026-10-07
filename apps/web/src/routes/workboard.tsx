@@ -56,6 +56,9 @@ function BoardCard({ task, missionId, onAction }: {
     {writer ? <p className={`workboard-line ${writer.expired ? "warn" : ""}`}>writer: {writer.expired ? "EXPIRED" : writer.active ? "active" : writer.state} · <span className="mono">{writer.run_id}</span> · generation {writer.generation} · expires {formatTimestamp(writer.expires_at)}</p> : null}
     <p className="workboard-line">artifacts: {task.artifacts.ids.length > 0 ? <a href={`/artifacts/${encodeURIComponent(task.artifacts.ids[0])}`}>{task.artifacts.count} existing</a> : <span>{task.artifacts.count} existing</span>}{task.artifacts.recorded !== task.artifacts.count ? ` · ${task.artifacts.recorded} recorded` : ""} · {task.artifacts.proof} proof</p>
     {task.approvals.pending > 0 ? <p className="workboard-line"><a className="badge badge-moderate" href="/approvals">APPROVAL REQUIRED{approval ? ` · ${approval.id}` : ""}</a></p> : null}
+    <p className="workboard-line">write isolation: <strong>{task.enforcement.write_isolation}</strong> · {task.enforcement.write_isolation_scope} · {task.enforcement.write_isolation_detail}</p>
+    <p className="workboard-line">filesystem isolation: <strong>{task.enforcement.filesystem_isolation}</strong> · {task.enforcement.filesystem_isolation_scope} · {task.enforcement.filesystem_isolation_detail}</p>
+    <p className="workboard-line faint">{task.enforcement.note}</p>
     {task.usage === null ? <p className="workboard-line faint">usage was not measured</p> : <p className="workboard-line faint">usage measured {formatTimestamp(task.usage.sampled_at)} · {JSON.stringify(task.usage.sample)}</p>}
     {task.reasons.length ? <ul className="workboard-reasons">{task.reasons.map((reason, index) => <li key={`${index}-${reason}`}>{reason}</li>)}</ul> : null}
     <div className="workboard-actions">

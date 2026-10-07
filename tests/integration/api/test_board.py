@@ -332,6 +332,47 @@ class BoardTest(unittest.TestCase):
         self.assertIsNotNone(usage)
         self.assertEqual(usage["sample"]["input_tokens"]["value"], 12)
 
+    def test_b4b_the_two_enforcement_dimensions_stay_separate(self) -> None:
+        """A worktree isolates concurrent writes and must never upgrade filesystem isolation."""
+        a = self.task("A")
+        enforcement = self.card(a)["enforcement"]
+        self.assertEqual(enforcement["write_isolation"], "weak", "no working copy, no write isolation")
+        self.assertEqual(enforcement["filesystem_isolation"], "unknown", "and nothing was measured")
+        self.assertIn("not a security boundary", enforcement["note"])
+
+        run = self.run_for(a, self.agent())
+        self.assertEqual(self.start(a, run).status_code, 200)
+        # The run must name the session whose policy was recorded, or there is nothing to read: the
+        # card follows the run -> session -> policy chain rather than guessing.
+        self.store.append(
+            self.store.new_event(
+                "run.created",
+                {"run_id": run, "task_id": a},
+                run_id=run,
+                task_id=a,
+                mission_id=self.mission,
+                session_id="ses_x",
+            )
+        )
+        # A recorded sandbox verdict is what the filesystem dimension reads -- not the worktree.
+        self.store.append(
+            self.store.new_event(
+                "session.policy",
+                {
+                    "session_id": "ses_x",
+                    "evidence": {"provider": "namespace", "filesystem": "strong", "network": "weak"},
+                },
+                run_id=run,
+                task_id=a,
+                mission_id=self.mission,
+                session_id="ses_x",
+            )
+        )
+        with_session = self.card(a)["enforcement"]
+        self.assertEqual(with_session["filesystem_isolation"], "strong", "read from the recorded evidence")
+        self.assertEqual(with_session["write_isolation"], "weak", "still no working copy here")
+        self.assertNotEqual(with_session["write_isolation"], with_session["filesystem_isolation"])
+
     def test_b5_an_expired_lease_is_not_an_active_writer(self) -> None:
         import subprocess
 

@@ -194,6 +194,20 @@ def main() -> int:
         check(b not in done_col, "B is not in DONE")
         page.screenshot(path=str(shots / "board-full.png"), full_page=True)
 
+        # 2b. the two enforcement dimensions are on the card and are not merged
+        check(
+            "write isolation" in body and "filesystem isolation" in body,
+            "the card separates write isolation from filesystem isolation",
+        )
+        check(
+            "filesystem isolation: unknown" in body,
+            "filesystem isolation reads unknown when no sandbox evidence exists, never a green badge",
+        )
+        check(
+            "it is not a security boundary" in body,
+            "the card says a worktree is not a sandbox",
+        )
+
         # 3. one 409 refusal is visible to the operator: start a task whose dependencies are not met
         refused = False
         try:

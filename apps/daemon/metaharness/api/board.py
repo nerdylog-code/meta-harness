@@ -165,6 +165,51 @@ def _approvals(store, task_id: str) -> dict[str, Any]:
     }
 
 
+def _enforcement(store, workspace_state: str | None, session_id: str | None) -> dict[str, Any]:
+    """The two enforcement dimensions, reported separately and never merged.
+
+    A worktree isolates concurrent repository writes -- moderate at best -- and says nothing about what
+    the runtime can read. That second dimension belongs to the sandbox, and it is read from the
+    evidence recorded for this task's own run. With no such evidence it reads `unknown`, because a
+    worktree must never upgrade a claim it cannot support.
+    """
+    ready = workspace_state == "ready"
+    result: dict[str, Any] = {
+        "write_isolation": "moderate" if ready else "weak",
+        "write_isolation_scope": "concurrent repository mutation",
+        "write_isolation_detail": (
+            "one isolated worktree per task; concurrent writers cannot collide"
+            if ready
+            else "no isolated working copy is ready"
+        ),
+        "filesystem_isolation": "unknown",
+        "filesystem_isolation_scope": "what the runtime can read",
+        "filesystem_isolation_detail": "no sandbox evidence was recorded for this task's run",
+        "note": "a worktree isolates concurrent writes; it is not a security boundary",
+    }
+    if not session_id:
+        return result
+    rows = store.rows(
+        "SELECT payload FROM events WHERE kind = 'session.policy' AND session_id = ? "
+        "ORDER BY seq DESC LIMIT 1",
+        (session_id,),
+    )
+    if not rows:
+        return result
+    try:
+        body = json.loads(rows[0]["payload"])
+    except (TypeError, ValueError):
+        return result
+    evidence = body.get("evidence") or {}
+    filesystem = evidence.get("filesystem")
+    if isinstance(filesystem, str):
+        result["filesystem_isolation"] = filesystem
+        result["filesystem_isolation_detail"] = (
+            f"recorded for this run's session, sandbox provider {evidence.get('provider') or 'unknown'}"
+        )
+    return result
+
+
 def _card(store, task: dict[str, Any], deps: dict[str, list[str]], states: dict[str, TaskState]) -> dict[str, Any]:
     task_id = task["id"]
     state = TaskState(task["state"])
@@ -181,6 +226,7 @@ def _card(store, task: dict[str, Any], deps: dict[str, list[str]], states: dict[
         proof = len(json.loads(task["proof"] or "[]"))
     except (TypeError, ValueError):
         recorded = proof = 0
+    enforcement = _enforcement(store, (workspace or {}).get("state"), (run or {}).get("session_id"))
     return {
         "task_id": task_id,
         "title": task["title"],
@@ -208,6 +254,7 @@ def _card(store, task: dict[str, Any], deps: dict[str, list[str]], states: dict[
             ],
         },
         "usage": _usage(store, task.get("run_id")),
+        "enforcement": enforcement,
         "created_at": task["created_ts"],
         "updated_at": task["updated_ts"],
         "completed_at": task["completed_ts"],
