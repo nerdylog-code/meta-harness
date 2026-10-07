@@ -33,8 +33,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
 from . import paths
@@ -52,6 +52,14 @@ from .reconcile import BootReconciler, PidProbe
 from .sandbox import ExecutionEnvironment
 from .runtimes.hermes.adapter import HermesRuntimeAdapter
 from .runtimes.pi.adapter import PiRuntimeAdapter
+from .auth import (
+    COOKIE_NAME,
+    ActorContext,
+    AuthMiddleware,
+    AuthRegistry,
+    SYSTEM_ACTOR,
+    actor_from_request,
+)
 from .store import Store, default_db_path
 from .version import VERSION, git_sha, runtime_info
 
@@ -77,6 +85,25 @@ class Settings:
     sandbox: str = "auto"
     #: The container runtime to look for when ``auto`` reaches the container rung.
     container_runtime: str = "docker"
+    #: Hosts a request may carry in ``Host`` and still be trusted. ``None`` derives the loopback set.
+    #: Loopback binding alone does not stop a DNS-rebinding style attack, so this is validated.
+    allowed_hosts: tuple[str, ...] | None = None
+    #: Origins a state-changing request may carry. ``None`` derives them from host and port.
+    allowed_origins: tuple[str, ...] | None = None
+
+    def resolved_allowed_hosts(self) -> tuple[str, ...]:
+        if self.allowed_hosts is not None:
+            return tuple(self.allowed_hosts)
+        return ("127.0.0.1", "localhost", "::1", self.host)
+
+    def resolved_allowed_origins(self) -> tuple[str, ...]:
+        if self.allowed_origins is not None:
+            return tuple(self.allowed_origins)
+        return (
+            f"http://127.0.0.1:{self.port}",
+            f"http://localhost:{self.port}",
+            f"http://[::1]:{self.port}",
+        )
 
     def resolved_data_dir(self) -> Path:
         return paths.data_root(self.data_dir)
@@ -162,6 +189,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         data_root = paths.ensure_layout(settings.data_dir)
         app.state.data_root = data_root
+        # One bootstrap capability per launch, delivered over a private channel the operator already
+        # owns: a 0600 file inside the daemon's own data root, consumed once and then deleted. It is
+        # deliberately not argv, not an inherited environment variable, not a log line, not canonical
+        # state, and not visible from inside a sandbox -- and it means no unauthenticated
+        # "give me credentials" endpoint has to exist.
+        registry: AuthRegistry = app.state.auth
+        capability = registry.issue_bootstrap()
+        bootstrap_path = data_root / "bootstrap.url"
+        bootstrap_path.write_text(
+            f"http://{settings.host}:{settings.port}/auth/bootstrap?capability={capability}\n",
+            encoding="utf-8",
+        )
+        bootstrap_path.chmod(0o600)
+        app.state.bootstrap_path = bootstrap_path
         # The store is opened here, not at import: a module that writes to disk as a side
         # effect of being imported is a module nobody can test in isolation.
         store = Store(default_db_path(settings.data_dir), data_root=settings.data_dir)
@@ -236,7 +277,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.store = None
     app.state.settings = settings
     app.state.started_at = started_at
-    app.add_middleware(LoopbackOnlyMiddleware)
+    auth_registry = AuthRegistry()
+    app.state.auth = auth_registry
+    # The loopback guard is kept, and authentication sits on top of it: being able to reach the port
+    # must not grant authority, and the event stream is a websocket that a BaseHTTPMiddleware would
+    # not cover -- hence one pure-ASGI gate for both.
+    app.add_middleware(
+        AuthMiddleware,
+        registry=auth_registry,
+        allowed_hosts=settings.resolved_allowed_hosts(),
+        allowed_origins=settings.resolved_allowed_origins(),
+        loopback_hosts=LOOPBACK_HOSTS,
+    )
 
     def _bus(app_or_request: Any = None) -> EventBus:
         bus = getattr(app.state, "bus", None)
@@ -273,14 +325,77 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/health")
     def health() -> dict[str, Any]:
-        return health_payload()
+        """Public liveness only. Detailed diagnostics moved behind authentication: a public endpoint
+        that names the data root, the store path and the bundle path tells an unauthenticated caller
+        where everything lives."""
+        return {
+            "status": "ok",
+            "service": "meta-harness",
+            "version": VERSION,
+            "auth_required": True,
+        }
 
     @app.get("/version")
     def version() -> dict[str, Any]:
         info = runtime_info()
-        info["data_root"] = str(settings.resolved_data_dir())
-        info["api_version"] = "v1"
-        return info
+        return {"service": "meta-harness", "version": VERSION, "api_version": "v1", **{
+            key: info[key] for key in ("python", "platform") if key in info
+        }}
+
+    @app.get("/v1/system/health")
+    def system_health(request: Request) -> dict[str, Any]:
+        """The full picture, for an authenticated actor only."""
+        payload = health_payload()
+        payload["actor"] = actor_from_request(request).provenance()
+        return payload
+
+    @app.get("/auth/bootstrap")
+    def bootstrap(capability: str) -> Response:
+        """Consume a single-use capability and open a session. There is no endpoint that hands out
+        authority to an unauthenticated caller -- this one requires a capability that only the
+        operator's own private channel ever carried, and it works exactly once."""
+        registry: AuthRegistry = app.state.auth
+        session = registry.consume_bootstrap(capability)
+        if session is None:
+            response = JSONResponse(
+                {"error": "unauthorized", "detail": "unknown, expired or already-used bootstrap capability"},
+                status_code=401,
+            )
+            response.headers["Cache-Control"] = "no-store"
+            return response
+        path: Path | None = getattr(app.state, "bootstrap_path", None)
+        if path is not None and path.exists():
+            path.unlink(missing_ok=True)
+        response = RedirectResponse("/", status_code=303)
+        # HttpOnly + SameSite=Strict, opaque content. `Secure` is omitted for loopback plain HTTP
+        # because a browser will not send a Secure cookie over HTTP; over a TLS transport it must be
+        # set. Documented rather than papered over.
+        response.set_cookie(
+            COOKIE_NAME,
+            session.session_id,
+            httponly=True,
+            samesite="strict",
+            path="/",
+            secure=False,
+        )
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.get("/v1/session")
+    def session_info(request: Request) -> dict[str, Any]:
+        """What the renderer may know: the actor, and the CSRF token it must send on mutations.
+
+        The CSRF token is renderer-visible by design and is not the authentication credential; only a
+        holder of the session cookie can read it.
+        """
+        scope_state = getattr(request, "scope", {}).get("state", {}) or {}
+        session = scope_state.get("session")
+        actor = actor_from_request(request)
+        return {
+            "actor": {"kind": actor.kind, "principal": actor.principal, "authentication": actor.authentication},
+            "csrf": getattr(session, "csrf", None),
+        }
 
     @app.get("/v1/events")
     def events(limit: int = BACKLOG_LIMIT) -> dict[str, Any]:

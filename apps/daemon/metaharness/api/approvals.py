@@ -31,6 +31,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from metaharness.auth import actor_from_request, grant_requires_operator
 from metaharness_contracts import ApprovalRequest, IdKind, RiskLevel, new_id
 from metaharness_contracts.approval import APPROVAL_TTL_S, payload_hash, requires_human
 
@@ -303,7 +304,10 @@ def grant_approval(approval_id: str, payload: GrantIn, request: Request) -> dict
         _publish(request, "approval.expired", {"reason": "ttl passed before a decision"}, approval_id=approval_id)
         raise HTTPException(status_code=409, detail=f"approval {approval_id} expired before it was granted")
     risk = RiskLevel(row["risk_level"])
-    if requires_human(risk) and not payload.by.strip():
+    # Authority is a kind, not a name. Before S2 this asked only that a non-empty string arrived in
+    # `by`; a runtime could therefore approve its own R3/R4 action by typing a person's name. The
+    # decision now reads the authenticated actor, and `by` stays what it always was: a label.
+    if grant_requires_operator(risk.value, actor_from_request(request)):
         raise HTTPException(
             status_code=409,
             detail=(

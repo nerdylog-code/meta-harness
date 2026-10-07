@@ -56,6 +56,7 @@ from .artifacts import (
     store_file,
 )
 from .db import connect, integrity_check, journal_mode, reading, transaction
+from ..auth import current_actor
 from .errors import AppendOnlyViolation, StoreError
 
 DEFAULT_DB_NAME = "metaharness.sqlite3"
@@ -179,6 +180,7 @@ class Store:
         **ids: Any,
     ) -> CanonicalEvent:
         """Build an event ready to append. The store assigns ``seq``, not the caller."""
+        provenance = {**(provenance or {}), "actor": current_actor().provenance()}
         return CanonicalEvent.build(
             kind,
             payload,
