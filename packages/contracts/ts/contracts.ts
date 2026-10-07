@@ -323,6 +323,8 @@ export interface TaskSpec {
   acceptance_gate: AcceptanceGate;
   artifacts?: string[];
   budget?: Budget;
+  completed_at?: number | null;
+  created_at?: number;
   deadline?: number | null;
   dependencies?: string[];
   description?: string;
@@ -332,6 +334,7 @@ export interface TaskSpec {
   parent_id?: string | null;
   proof?: string[];
   retries?: number;
+  run_id?: string | null;
   state?: TaskState;
   title: string;
   workspace_policy?: WorkspacePolicy;

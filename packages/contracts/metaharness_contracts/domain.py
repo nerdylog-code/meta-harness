@@ -110,6 +110,11 @@ class TaskSpec(BaseModel):
     proof: list[str] = Field(default_factory=list)
     retries: int = 0
     parent_id: str | None = None
+    #: The Run that executed this task. A Run executes a Task; a Task is not a Session, and a run
+    #: belonging to another task may not complete this one.
+    run_id: str | None = None
+    created_at: float = 0.0
+    completed_at: float | None = None
 
     @field_validator("id")
     @classmethod

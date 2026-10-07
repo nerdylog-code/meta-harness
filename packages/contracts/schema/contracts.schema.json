@@ -1589,6 +1589,23 @@
         "budget": {
           "$ref": "#/$defs/Budget"
         },
+        "completed_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "created_at": {
+          "default": 0.0,
+          "title": "Created At",
+          "type": "number"
+        },
         "deadline": {
           "anyOf": [
             {
@@ -1656,6 +1673,18 @@
           "default": 0,
           "title": "Retries",
           "type": "integer"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
         },
         "state": {
           "$ref": "#/$defs/TaskState",

@@ -8,5 +8,6 @@ record and the API is a view onto it.
 from __future__ import annotations
 
 from .agents import router as agents_router
+from .tasks import router as tasks_router
 
-__all__ = ["agents_router"]
+__all__ = ["agents_router", "tasks_router"]
