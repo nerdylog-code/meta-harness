@@ -38,7 +38,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
 
 from . import paths
-from .api import agents_router, tasks_router
+from .api import agents_router, approvals_router, tasks_router
 from .events import EventBus
 from .reconcile import BootReconciler, PidProbe
 from .sandbox import ExecutionEnvironment
@@ -338,6 +338,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_api_websocket_route("/events/ws", _event_stream)  # WP-002 gate alias
     app.include_router(agents_router)
     app.include_router(tasks_router)
+    app.include_router(approvals_router)
 
     web_root = settings.resolved_web_root()
     if web_root is not None:

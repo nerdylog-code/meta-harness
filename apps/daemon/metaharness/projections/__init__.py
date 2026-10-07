@@ -21,6 +21,7 @@ from typing import Any, Iterable, Protocol, runtime_checkable
 from metaharness_contracts import CanonicalEvent
 
 from ..store.errors import ProjectionError
+from .approvals import ApprovalsProjection
 from .artifacts import ArtifactsProjection
 from .domain import (
     AgentsProjection,
@@ -35,6 +36,7 @@ from .tasks import TasksProjection
 __all__ = [
     "DEFAULT_PROJECTIONS",
     "AgentsProjection",
+    "ApprovalsProjection",
     "ArtifactsProjection",
     "CapsulesProjection",
     "MigrationsProjection",
@@ -76,6 +78,7 @@ DEFAULT_PROJECTIONS: tuple[Projection, ...] = (
     CapsulesProjection(),
     MigrationsProjection(),
     TasksProjection(),
+    ApprovalsProjection(),
 )
 
 
