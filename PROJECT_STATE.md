@@ -28,6 +28,16 @@ only when it is ready, a completion carries the evidence its gate requires, and 
 one task cannot close another. The UI is a projection of it (Mission → Overview / Work Graph /
 Tasks) and holds no domain state of its own.
 
+**Honest limit on acceptance.** Acceptance *evidence* is enforced: a completion without the proof
+its acceptance gate requires is refused. Acceptance *authority* is not: the API has no actor
+authentication, so nothing today proves that an agent did not accept its own work. That is what
+Approvals and the S2 auth work are for, and no temporary actor id was invented to look green.
+
+One concept, one canonical wire field: `description`, `state`, `owner_agent`. The API rejects a
+payload that still sends `objective`, `status` or `assigned_agent_id` (422) instead of ignoring it,
+and a test keeps those aliases from returning. Friendly labels ("Objective", "Assigned agent",
+"Completed") are the UI's business; the values stay canonical.
+
 Two contract notes: the states are the Book's `TaskState` vocabulary
 (`draft/ready/claimed/running/waiting/review/blocked/failed/done/cancelled`), so the brief's
 `planned` and `completed` map to `draft` and `done` -- renaming a shared enum is a contract change

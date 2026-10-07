@@ -185,7 +185,7 @@ export function MissionPage({ missionId }: { missionId: string }) {
     mutationFn: () =>
       createTask(missionId, {
         title,
-        objective,
+        description: objective,
         dependencies: deps,
         requiresArtifact,
         ownerAgent: ownerAgent.trim() || null,
@@ -573,7 +573,7 @@ export function MissionPage({ missionId }: { missionId: string }) {
                         </td>
                         <td>
                           <span className="mono">
-                            {task.assigned_agent_id ?? task.owner_agent ?? "—"}
+                            {task.owner_agent ?? "—"}
                           </span>
                           <div className="task-actions">
                             <input

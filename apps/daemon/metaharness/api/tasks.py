@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from metaharness_contracts import IdKind, new_id
 from metaharness_contracts.taskgraph import (
@@ -41,8 +41,15 @@ router = APIRouter(tags=["tasks"])
 
 
 class TaskIn(BaseModel):
+    """What a caller may say when creating a task. One concept, one field: `description`.
+
+    Extras are forbidden rather than ignored: a client that still sends `objective` gets a 422
+    naming the field, instead of a task whose description silently stayed empty.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     title: str
-    objective: str = ""
     description: str = ""
     dependencies: list[str] = Field(default_factory=list)
     acceptance_gate: dict[str, Any] | None = None
@@ -78,9 +85,10 @@ class ReasonIn(BaseModel):
 
 
 class UpdateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str | None = None
     description: str | None = None
-    objective: str | None = None
     workspace_scope: str | None = None
 
 
@@ -131,11 +139,9 @@ def _view(task: dict[str, Any], dependencies: list[str], states: dict) -> dict[s
         "id": task["id"],
         "mission_id": task["mission_id"],
         "title": task["title"],
-        "objective": task["description"],
+        "description": task["description"],
         "state": task["state"],
-        "status": task["state"],
         "owner_agent": task["owner_agent"],
-        "assigned_agent_id": task["owner_agent"],
         "run_id": task["run_id"],
         "workspace_scope": task["workspace_scope"],
         "dependencies": dependencies,
@@ -271,7 +277,7 @@ def create_task(mission_id: str, payload: TaskIn, request: Request) -> dict[str,
             "task_id": task_id,
             "mission_id": mission_id,
             "title": payload.title,
-            "description": payload.objective or payload.description,
+            "description": payload.description,
             "state": "draft",
             "owner_agent": payload.owner_agent,
             "workspace_scope": payload.workspace_scope,
@@ -492,8 +498,6 @@ def update_task(task_id: str, payload: UpdateIn, request: Request) -> dict[str, 
         body["title"] = payload.title
     if payload.description is not None:
         body["description"] = payload.description
-    if payload.objective is not None:
-        body["description"] = payload.objective
     if payload.workspace_scope is not None:
         body["workspace_scope"] = payload.workspace_scope
     _publish(request, "task.updated", body, task=task)

@@ -41,7 +41,7 @@ class WorkGraphTest(unittest.TestCase):
     def task(self, title: str, deps: list[str] | None = None, **extra) -> str:
         response = self.client.post(
             f"/v1/missions/{self.mission}/tasks",
-            json={"title": title, "objective": f"do {title}", "dependencies": deps or [], **extra},
+            json={"title": title, "description": f"do {title}", "dependencies": deps or [], **extra},
         )
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["id"]
@@ -179,6 +179,30 @@ class WorkGraphTest(unittest.TestCase):
         task_b = self.client.get(f"/v1/tasks/{ids['b']}").json()
         self.assertIn("build.log", task_b["proof"], "the evidence survived the restart")
 
+    def test_a8_the_wire_has_one_field_per_concept(self) -> None:
+        """No aliases. `objective`, `status` and `assigned_agent_id` were removed from the wire.
+
+        The rule is one concept -> one canonical field: `description`, `state`, `owner_agent`. A
+        friendly label belongs in the UI, not in the payload, and this test is what stops an alias
+        from creeping back in.
+        """
+        task = self.task("Canonical")
+        view = self.client.get(f"/v1/tasks/{task}").json()
+        for alias in ("objective", "status", "assigned_agent_id"):
+            self.assertNotIn(alias, view, f"{alias} is an alias and must not be on the wire")
+        for canonical in ("description", "state", "owner_agent"):
+            self.assertIn(canonical, view, f"{canonical} is the canonical field")
+        # A client that still sends the old name is told, not silently ignored.
+        refused = self.client.post(
+            f"/v1/missions/{self.mission}/tasks", json={"title": "Old client", "objective": "legacy"}
+        )
+        self.assertEqual(refused.status_code, 422, refused.text)
+        updated = self.client.post(f"/v1/tasks/{task}/update", json={"objective": "legacy"})
+        self.assertEqual(updated.status_code, 422, updated.text)
+        listed = self.client.get(f"/v1/missions/{self.mission}/tasks").json()["tasks"][0]
+        for alias in ("objective", "status", "assigned_agent_id"):
+            self.assertNotIn(alias, listed, f"{alias} must not appear in the graph either")
+
     # ------------------------------------------------------------------ refusals
 
     def test_b1_a_cycle_is_refused(self) -> None:
@@ -191,7 +215,7 @@ class WorkGraphTest(unittest.TestCase):
     def test_b2_a_dependency_that_does_not_exist_is_refused(self) -> None:
         response = self.client.post(
             f"/v1/missions/{self.mission}/tasks",
-            json={"title": "X", "objective": "x", "dependencies": ["tsk_missing"]},
+            json={"title": "X", "description": "x", "dependencies": ["tsk_missing"]},
         )
         self.assertEqual(response.status_code, 409, response.text)
         self.assertIn("do not exist", response.json()["detail"])

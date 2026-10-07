@@ -90,7 +90,7 @@ class TasksProjection:
                     task_id,
                     str(body.get("mission_id") or event.mission_id or ""),
                     str(body.get("title") or "untitled"),
-                    str(body.get("description") or body.get("objective") or ""),
+                    str(body.get("description") or ""),
                     str(body.get("state") or "draft"),
                     body.get("owner_agent"),
                     body.get("run_id"),

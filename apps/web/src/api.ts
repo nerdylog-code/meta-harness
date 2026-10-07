@@ -366,11 +366,12 @@ export interface MissionTask {
   id: string;
   mission_id: string;
   title: string;
-  objective: string;
+  /** Canonical wire name. The UI may label it "Objective"; the field stays `description`. */
+  description: string;
+  /** Canonical wire name: `state`, never `status`. */
   state: string;
-  status: string;
+  /** Canonical wire name: `owner_agent`, never `assigned_agent_id`. */
   owner_agent: string | null;
-  assigned_agent_id: string | null;
   run_id: string | null;
   workspace_scope: string | null;
   dependencies: string[];
@@ -445,7 +446,8 @@ export const createTask = (
   missionId: string,
   input: {
     title: string;
-    objective: string;
+    /** The wire field is `description`; the form may label it "Objective". */
+    description: string;
     dependencies: string[];
     requiresArtifact: boolean;
     ownerAgent: string | null;
@@ -453,7 +455,7 @@ export const createTask = (
 ) =>
   sendJson<MissionTask>("POST", `/v1/missions/${encodeURIComponent(missionId)}/tasks`, {
     title: input.title,
-    objective: input.objective,
+    description: input.description,
     dependencies: input.dependencies,
     requires_artifact: input.requiresArtifact,
     owner_agent: input.ownerAgent,
