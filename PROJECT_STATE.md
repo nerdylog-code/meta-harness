@@ -115,8 +115,8 @@ nothing today bounds what a migrated agent may execute. The handoff rendering no
 acknowledgement instead of open work, which is the right ask for a transfer -- but a scratch
 directory is not a sandbox, and the script says so.
 
-**478 tests green locally** across 8 suites (v1 21, unit 63, contracts 113, store 57, integration
-158, replay 21, conformance 34, desktop 11) and the CI matrix is green on `ubuntu-latest` and
+**496 tests green locally** across 8 suites (v1 21, unit 63, contracts 113, store 57, integration
+176, replay 21, conformance 34, desktop 11) and the CI matrix is green on `ubuntu-latest` and
 `windows-latest`. `master` and the tag `v0.1-hermes-hosted` are untouched.
 
 | WP | State |
@@ -190,6 +190,32 @@ buttons, and a refusal is shown with the daemon''s own detail string. Live updat
 when a `task.*`, `workspace.*`, `approval.*`, `artifact.*`, `run.*` or `usage.*` event arrives, with
 no client-side event-sourced task store.
 
+**Canvas V1 — complete.** The mission surface is now a graph: canonical state drawn as typed nodes
+and typed edges, plus a constrained editor for the operations the daemon already supports. It is a
+**projection**, composed on read by `GET /v1/missions/{id}/canvas` from the same projections the board
+uses -- there is no `canvas_nodes` or `canvas_edges` table, no new `IdKind`, and a node key is a view
+identifier (`task:tsk_…`, `agent:agt_…`, `run:run_…`, `workspace:<task id>`) rather than a new public
+id. A dependency edge runs from the dependency to the dependent, so an arrow reads "this task is
+needed by that one", and waves come from the Work Graph's own rule, so the browser never computes a
+second topology.
+
+Only two edge kinds are **mutable**, because only those have a daemon command that could change them:
+a task dependency and an assignment. A run, a lease, a workspace, an approval and an artifact are
+read-only, and the canvas offers no affordance for them. Connecting two tasks confirms "make B depend
+on A" before calling the endpoint, a refusal is shown with the daemon's detail, and **no drag ever
+changes a state** -- dragging moves a node, and a browser check asserts the task's canonical state is
+identical afterwards.
+
+Layout is presentation state: a deterministic initial arrangement from the server's waves, then
+positions the user dragged, saved in `localStorage` per mission. Losing them loses no entity and
+cannot touch canonical state. The workspace node keeps **write isolation** and **filesystem isolation**
+as two separate lines, never an "isolated" badge, and the artifact node shows the integrity the daemon
+sent (`unchecked`, because drawing a graph must not hash every file).
+
+**Control transfer, computer control, channels and voice are not built**, and the canvas says so on
+screen: control transfer is unavailable because actor identity is not authenticated. No node exists
+for a capability whose canonical state does not exist yet.
+
 ## Working (verified in this checkout)
 
 - **Daemon** `apps/daemon/metaharness`: `GET /health`, `GET /version`, `GET /v1/events`, `WS /v1/events/ws` (+ `/events/ws` alias), loopback-only guard, optional static mount of the web bundle.
@@ -227,7 +253,7 @@ no client-side event-sourced task store.
   say why they are unavailable, five canonical budgets with per-dimension enforcement levels, and
   `tests/integration/sandbox/test_execution_boundary.py` (10 tests, 1 skip where no strong provider
   exists). `scripts/e2e_m3.py` exits 0 with 31 checks against the real runtime.
-- **Tests**: v1 regression 21/21 · unit 63/63 (work-graph rules, board placement, waves and explanations) · contracts 113/113 · store 57/57 · integration 158/158 (agents 10, migration 10, tasks 20, board 18, approvals 16, artifacts 16, workspaces 24, execution-boundary 10, event-stream 4, process-supervisor 13, pi-transport 17) · replay 21/21 (reconciliation 10, equivalence 5, restart-and-crash 6) · conformance 34/34 (2 skips, by design) · desktop 11/11 — **478 measured by `scripts/test.py`**, which is the only number to trust: earlier notes in this file quoted a total that was never counted, and this one was read off the runner's own output. The suites exercise a real server, real websockets, real process trees and real hard kills; the whole default run is ~2 min.
+- **Tests**: v1 regression 21/21 · unit 63/63 (work-graph rules, board placement, waves and explanations) · contracts 113/113 · store 57/57 · integration 176/176 (agents 10, migration 10, tasks 20, board 18, canvas 18, approvals 16, artifacts 16, workspaces 24, execution-boundary 10, event-stream 4, process-supervisor 13, pi-transport 17) · replay 21/21 (reconciliation 10, equivalence 5, restart-and-crash 6) · conformance 34/34 (2 skips, by design) · desktop 11/11 — **496 measured by `scripts/test.py`**, which is the only number to trust: earlier notes in this file quoted a total that was never counted, and this one was read off the runner's own output. The suites exercise a real server, real websockets, real process trees and real hard kills; the whole default run is ~2 min.
 - **ProcessSupervisor** `apps/daemon/metaharness/process`: one interface, two OS implementations, pre-signal tree snapshot, verified kill (`orphan_check` inside the emitted event), bounded streams, wall-timeout budget. Design and the orphan bug it fixed: `docs/architecture/PROCESS_SUPERVISION.md`.
 - **Web shell** `apps/web` (WP-006): Vite + React + TS + TanStack Query + TanStack Router (code-based routes), one websocket owned by a context provider, connection state that distinguishes live from degraded from connecting, an event inspector that always says whether it is showing the live socket or the durable backlog, and a sidebar that marks unbuilt surfaces as `soon` instead of linking to nowhere. Built bundle is served by the daemon with an SPA fallback; deep links work and path traversal is refused (403, verified with `curl --path-as-is`). DOM verified in headless Chromium: the shell renders, the badge reads `live`, and the log's events appear.
 - **CI** `.github/workflows/ci.yml`: matrix `ubuntu-latest` + `windows-latest`, seven suites (v1, unit, contracts, store, integration, replay, conformance), plus a web job gated on `apps/web/package.json`.
@@ -236,7 +262,7 @@ no client-side event-sourced task store.
 
 No context engine, no plugin kernel, no secrets broker, no channels, no voice, no RAG, no auth
 token enforcement (the enforced property today is **loopback-only**), no authenticated actor identity (the API cannot prove who is
-asking), no selective egress filtering, and no Canvas surface yet.
+asking) and no selective egress filtering.
 
 **Runtimes:** Pi (`pi --mode rpc`) and **Hermes (`hermes acp`)** are implemented adapters with
 conformance suites (ADR-0006, ADR-0016, `docs/protocols/`). OpenClaw and OMP are still adapters on
@@ -245,7 +271,19 @@ paper. The desktop shell exists: a window plus a Python host (ADR-0009,
 
 ## Next
 
-**Canvas V1** (the current one). The order the Architect set, revised so that identity comes before
+**S2 — actor authentication and selective egress** (the current one). The Architect's order, revised
+so identity comes before mutation: **Workboard → Canvas V1 → S2 → Local Computer / Live Workspace →
+Human ↔ Agent control transfer.** The canvas was deliberately built without control transfer because
+the control plane cannot yet prove who is asking; every surface that would mutate on a human's behalf
+now waits behind that gate. S2 is also what makes per-task artifact access and the approver's identity
+verifiable, and what stops an agent with an open network from reaching the control plane's own API --
+the hole the S1 run demonstrated.
+
+**After S2:** the layer the owner defined as next priority -- a local screen showing the agent working,
+then voice, then persistent communication, then an agent that feels alive. Canvas V1 was the last piece
+of infrastructure before that experience.
+
+**Historical note.** The previous milestone was Canvas V1. The order the Architect set, revised so that identity comes before
 mutation: **Workboard → Canvas V1 → S2 (auth + selective egress) → Live Workspace → Human ↔ Agent
 takeover.** Work, authority, evidence, isolated working copies with a single writer, and now the board
 that shows all of them at once all exist -- which means the Canvas has every entity it needs to be
