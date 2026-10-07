@@ -4,9 +4,11 @@ Concise checkpoint. Not a diary. (BOOK §111/§112.)
 
 **Branch:** `v2/control-plane` · **Historical tag:** `v0.1-hermes-hosted` → `3ef4a5c` (immutable)
 **Authority order:** `PROJECT_BOOK.md` → accepted ADRs → this file → the current work package → code → tests.
-`PROJECT_BOOK.md` now lives in the repository root (sha256 `d248ebbab24fcac2…`, 3145 lines), so
-the first item of the authority order is readable from a clone instead of only from the owner's
-machine. It is the owner's document, unedited.
+`PROJECT_BOOK.md` lives in the repository root and is the architect-maintained product and
+architecture source of truth, so the first item of the authority order is readable from a clone
+instead of only from the owner's machine. It is the owner's document, and its owner revises it --
+so this file deliberately records no hash and no line count for it. Those numbers were stale the
+moment the Book changed, and a stale integrity claim is worse than no claim.
 
 ---
 
