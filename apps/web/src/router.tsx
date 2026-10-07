@@ -20,6 +20,7 @@ import { EventInspectorPage } from "./routes/events";
 import { MissionOverviewPage } from "./routes/index";
 import { MissionsPage } from "./routes/missions";
 import { MissionPage } from "./routes/mission";
+import { WorkboardPage } from "./routes/workboard";
 import { ApprovalsPage } from "./routes/approvals";
 import { ArtifactRoute } from "./routes/artifact";
 import { SystemPage } from "./routes/system";
@@ -74,6 +75,17 @@ const missionRoute = createRoute({
   component: MissionDetailRoute,
 });
 
+const workboardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/missions/$missionId/board",
+  component: MissionWorkboardRoute,
+});
+
+function MissionWorkboardRoute() {
+  const { missionId } = workboardRoute.useParams();
+  return <WorkboardPage missionId={missionId} />;
+}
+
 function MissionDetailRoute() {
   const { missionId } = missionRoute.useParams();
   return <MissionPage missionId={missionId} />;
@@ -124,6 +136,7 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   missionsRoute,
   missionRoute,
+  workboardRoute,
   agentsRoute,
   agentRoute,
   eventsRoute,

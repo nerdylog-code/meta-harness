@@ -454,3 +454,31 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 .workspace-form button, .workspace-actions > button { min-height: 2.25rem; }
 .workspace-actions > button { align-self: flex-start; border-color: var(--warn); }
 .workspace-form button:focus-visible, .workspace-actions > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* --------------------------------------------------------------- workboard */
+.workboard-toolbar, .workboard-filters, .workboard-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.workboard-toolbar { justify-content: space-between; margin-bottom: 0.7rem; }
+.workboard-filters { padding-top: 0.65rem; border-top: 1px solid var(--line); }
+.workboard-filters label { display: flex; align-items: center; gap: 0.35rem; color: var(--muted); font-size: 0.7rem; }
+.workboard-filters select { max-width: 12rem; padding: 0.35rem; color: var(--fg); background: var(--bg); border: 1px solid var(--line-strong); font: inherit; }
+.workboard-check input { accent-color: var(--accent); }
+.workboard-columns { display: flex; align-items: flex-start; gap: 0.65rem; overflow-x: auto; padding: 0.2rem 0 0.8rem; }
+.workboard-column { flex: 0 0 min(21rem, 82vw); min-width: 0; padding: 0.55rem; border: 1px solid var(--line); background: var(--panel); }
+.workboard-column > header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding-bottom: 0.45rem; margin-bottom: 0.55rem; border-bottom: 1px solid var(--line); }
+.workboard-column h2 { margin: 0; font-size: 0.77rem; letter-spacing: 0.08em; }
+.workboard-card { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; padding: 0.65rem; margin-bottom: 0.55rem; border: 1px solid var(--line-strong); background: var(--bg); }
+.workboard-card-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; }
+.workboard-card-title h3 { margin: 0 0 0.15rem; font-size: 0.78rem; overflow-wrap: anywhere; }
+.workboard-card-title code { color: var(--faint); font-size: 0.64rem; overflow-wrap: anywhere; }
+.workboard-line { margin: 0; font-size: 0.68rem; line-height: 1.5; overflow-wrap: anywhere; }
+.workboard-locator { overflow-wrap: anywhere; }
+.workboard-reasons { margin: 0.15rem 0; padding: 0.45rem 0.45rem 0.45rem 1.4rem; border-left: 2px solid var(--warn); color: var(--warn); font-size: 0.68rem; line-height: 1.5; }
+.workboard-actions { padding-top: 0.4rem; border-top: 1px solid var(--line); }
+.workboard-actions a, .workboard-actions button { padding: 0.22rem 0.35rem; border: 1px solid var(--line-strong); font: inherit; font-size: 0.63rem; background: var(--panel); color: var(--fg); cursor: pointer; }
+.workboard-actions a:hover { color: var(--accent); text-decoration: none; }
+.workboard-degraded, .workboard-filter-empty { margin: 0.65rem 0; padding: 0.65rem; border: 1px solid var(--warn); color: var(--warn); background: var(--panel); }
+.workboard-degraded ul { margin-bottom: 0; }
+.workboard-waves { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.workboard-waves > div { display: flex; flex-direction: column; gap: 0.25rem; max-width: 100%; padding: 0.45rem; border: 1px solid var(--line); overflow-wrap: anywhere; }
+.workboard-waves strong { color: var(--accent); }
+@media (max-width: 760px) { .workboard-filters { align-items: flex-start; flex-direction: column; } .workboard-filters select { max-width: 100%; } }

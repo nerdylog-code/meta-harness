@@ -266,6 +266,7 @@ export function MissionPage({ missionId }: { missionId: string }) {
   return (
     <>
       <Panel title={mission?.title ?? "mission"} hint={missionId}>
+        <p className="tight"><Link to="/missions/$missionId/board" params={{ missionId }}>Open Workboard</Link></p>
         <KeyValues
           rows={[
             ["objective", mission?.objective ? mission.objective : <span className="faint">—</span>],

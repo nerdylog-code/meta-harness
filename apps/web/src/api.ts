@@ -439,6 +439,85 @@ async function sendJson<T>(method: "POST" | "DELETE", path: string, body?: unkno
 export const fetchMissionTasks = (missionId: string) =>
   getJson<MissionTasksPayload>(`/v1/missions/${encodeURIComponent(missionId)}/tasks`);
 
+// ---------------------------------------------------------------------- workboard
+
+export interface WorkboardTask {
+  task_id: string;
+  title: string;
+  state: string;
+  lane: string;
+  agent: { id: string } | null;
+  dependencies: string[];
+  blocked: { waiting_on: string[]; dead: string[] };
+  run: {
+    run_id: string;
+    state: string | null;
+    runtime_id?: string | null;
+    agent_id?: string | null;
+    session_id?: string | null;
+    provider?: string | null;
+    model?: string | null;
+    reason?: string | null;
+    note?: string | null;
+  } | null;
+  workspace: {
+    provider: string;
+    locator: string;
+    state: string;
+    dirty: boolean | null;
+    measured: boolean;
+    note: string | null;
+  } | null;
+  writer: {
+    run_id: string;
+    generation: number;
+    expires_at: number;
+    state: string;
+    active: boolean;
+    expired: boolean;
+  } | null;
+  approvals: {
+    pending: number;
+    by_state: Record<string, number>;
+    requires_attention: boolean;
+    latest: { id: string } | null;
+    expired_pending: string[];
+  };
+  artifacts: { count: number; recorded: number; proof: number };
+  usage: { sample: Record<string, unknown>; sampled_at: number } | null;
+  reasons: string[];
+  wave: number | null;
+  created_at: number;
+  updated_at: number;
+  completed_at: number | null;
+}
+
+export interface WorkboardPayload {
+  mission: { id: string; title: string; objective: string | null; state: string | null };
+  columns: Array<{ lane: string; count: number; tasks: WorkboardTask[] }>;
+  waves: Array<{ wave: number; tasks: string[] }>;
+  counts: Record<string, number>;
+  total: number;
+  filters: {
+    agents: string[];
+    runtimes: string[];
+    states: string[];
+    lanes: string[];
+    needs_approval: string[];
+    has_workspace: string[];
+    has_active_lease: string[];
+    blocked: string[];
+  };
+  degraded: string[];
+  composed_at: number;
+}
+
+export const fetchMissionBoard = (missionId: string) =>
+  getJson<WorkboardPayload>(`/v1/missions/${encodeURIComponent(missionId)}/board`);
+
+export const requestTaskReview = (taskId: string) =>
+  sendJson<MissionTask>("POST", `/v1/tasks/${encodeURIComponent(taskId)}/review`, {});
+
 export const fetchTask = (taskId: string) =>
   getJson<MissionTask>(`/v1/tasks/${encodeURIComponent(taskId)}`);
 

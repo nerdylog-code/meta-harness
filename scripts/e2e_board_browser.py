@@ -137,8 +137,10 @@ def main() -> int:
     check(approval[0] == 200, "an approval is pending for B", str(approval[0]))
 
     board_url = f"http://127.0.0.1:{port}/missions/{mission_id}/board"
-    shots = REPO_ROOT / ".hermes-browser-shots"
-    shots.mkdir(exist_ok=True)
+    # Screenshots go to a scratch directory, never into the repository: evidence must not become
+    # tracked clutter.
+    shots = Path(tempfile.gettempdir()) / "mh-board-shots"
+    shots.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------ drive Chromium
     from playwright.sync_api import sync_playwright
@@ -173,10 +175,15 @@ def main() -> int:
 
         running_col = column_text("RUNNING")
         done_col = column_text("DONE")
-        check("RUNNING" in body and running_col != "", "the RUNNING column is locatable in the DOM")
-        in_running = b in running_col or "RUNNING" in body
-        check(in_running, "B appears in RUNNING")
-        check(("DONE" in body) and (done_col == "" or a in done_col or True), "A appears in DONE")
+        waiting_col = column_text("WAITING")
+        check(running_col != "", "the RUNNING column is locatable in the DOM")
+        check(done_col != "", "the DONE column is locatable in the DOM")
+        # Strict: the task id must be inside that lane's own text. A relaxed check here would be the
+        # kind of green that hides a card sitting in the wrong column.
+        check(b in running_col, "B (the running task) is inside the RUNNING column")
+        check(a in done_col, "A (the finished task) is inside the DONE column")
+        check(d in waiting_col and d not in running_col, "D waits: it is in WAITING and not in RUNNING")
+        check(b not in done_col, "B is not in DONE")
         page.screenshot(path=str(shots / "board-full.png"), full_page=True)
 
         # 3. one 409 refusal is visible to the operator: start a task whose dependencies are not met
