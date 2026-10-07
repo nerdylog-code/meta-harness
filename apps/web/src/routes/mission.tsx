@@ -14,8 +14,8 @@
  * * **`start` is enabled only when the daemon says the task is ready** -- never on a guess.
  */
 
-import { useMemo, useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useSearch } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ApiRefusal,
@@ -149,6 +149,25 @@ function ArtifactReferences({ value, label }: { value: string; label: string }) 
 export function MissionPage({ missionId }: { missionId: string }) {
   const queryClient = useQueryClient();
   const [view, setView] = useState<View>("overview");
+  // A board card links here with `?task=<id>` meaning "show me this task". The intent is honoured
+  // rather than ignored: the view switches to the task table and the row is brought into sight.
+  const search = useSearch({ strict: false }) as { task?: string };
+  const focusTask = search.task;
+  useEffect(() => {
+    if (!focusTask) return;
+    setView("tasks");
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      const row = document.getElementById(`task-${focusTask}`);
+      if (row) {
+        row.scrollIntoView({ block: "center" });
+        window.clearInterval(timer);
+      } else if ((tries += 1) > 20) {
+        window.clearInterval(timer);
+      }
+    }, 150);
+    return () => window.clearInterval(timer);
+  }, [focusTask]);
   const [notice, setNotice] = useState<Notice | null>(null);
 
   // create-task form state
@@ -403,7 +422,7 @@ export function MissionPage({ missionId }: { missionId: string }) {
                 </thead>
                 <tbody>
                   {tasks.map((task) => (
-                    <tr key={task.id}>
+                    <tr key={task.id} id={`task-${task.id}`} className={focusTask === task.id ? "row-focus" : undefined}>
                       <td>
                         {task.title}
                         <div className="faint mono">{task.id}</div>
@@ -570,7 +589,7 @@ export function MissionPage({ missionId }: { missionId: string }) {
                   {tasks.map((task) => {
                     const legal = legality(task);
                     return (
-                      <tr key={task.id}>
+                      <tr key={task.id} id={`task-${task.id}`} className={focusTask === task.id ? "row-focus" : undefined}>
                         <td>
                           {task.title}
                           <div className="faint mono">{task.id}</div>

@@ -151,6 +151,14 @@ def main() -> int:
         page = browser.new_page(viewport={"width": 1600, "height": 1000})
         console: list[str] = []
         page.on("console", lambda message: console.append(f"{message.type}: {message.text}"))
+        # Record every non-2xx response with its URL, so a 404 in the console is a fact rather than
+        # something to be explained away.
+        page.on(
+            "response",
+            lambda response: console.append(f"http {response.status} {response.url}")
+            if response.status >= 400
+            else None,
+        )
         page.on("pageerror", lambda error: console.append(f"pageerror: {error}"))
 
         page.goto(board_url, wait_until="networkidle")
@@ -211,6 +219,28 @@ def main() -> int:
         check(after != before, "the board refetched after canonical events and changed on screen")
         page.screenshot(path=str(shots / "board-after-events.png"), full_page=True)
 
+        # 4b. the card's "open task" link actually lands on the task it named
+        try:
+            page.goto(board_url, wait_until="networkidle")
+            time.sleep(1.0)
+            open_task = page.get_by_role("link", name="open task").first
+            href = open_task.get_attribute("href") or ""
+            open_task.click()
+            time.sleep(2.0)
+            landed = page.inner_text("body")
+            check(b in landed or a in landed, "the card's open-task link lands on a task view", page.url)
+            # A task with no working copy is a normal state, not a failure: the panel must say so.
+            check(
+                "No isolated working copy exists" in landed,
+                "a task without a workspace reads as an empty state, not as an error",
+            )
+            check("Retry workspace read" not in landed, "and no error panel is shown for a 404")
+            check(href.startswith("/missions/"), "the link is a mission deep link", href)
+            page.goto(board_url, wait_until="networkidle")
+            time.sleep(0.8)
+        except Exception as error:  # noqa: BLE001
+            check(False, "the card's open-task link lands on a task view", str(error))
+
         # 5. the deep link survives a reload
         page.reload(wait_until="networkidle")
         time.sleep(1.5)
@@ -221,7 +251,7 @@ def main() -> int:
         browser.close()
 
     print("\n--- console ---")
-    for line in console[-12:]:
+    for line in console[-14:]:
         print(f"  {line}")
     print(f"\nscreenshots: {shots}")
 

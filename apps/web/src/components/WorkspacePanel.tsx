@@ -43,9 +43,17 @@ export function WorkspacePanel({ taskId }: { taskId: string }) {
   });
 
   if (workspaceQuery.isLoading) return <Panel title={`Task workspace · ${taskId}`}><Loading label="reading task workspace from the daemon" /></Panel>;
-  if (workspaceQuery.isError) return <Panel title={`Task workspace · ${taskId}`} variant="error"><p className="tight error" role="alert">{errorText(workspaceQuery.error)}</p><button type="button" onClick={() => void workspaceQuery.refetch()}>Retry workspace read</button></Panel>;
+  // A 404 is the daemon saying "this task has no working copy yet", which is the common case and not
+  // a failure: it must fall through to the empty state below, not render as an error. Anything else
+  // really is a failure and is shown with its detail.
+  if (workspaceQuery.isError) {
+    const refusal = workspaceQuery.error instanceof ApiRefusal ? workspaceQuery.error : null;
+    if (refusal?.status !== 404) {
+      return <Panel title={`Task workspace · ${taskId}`} variant="error"><p className="tight error" role="alert">{errorText(workspaceQuery.error)}</p><button type="button" onClick={() => void workspaceQuery.refetch()}>Retry workspace read</button></Panel>;
+    }
+  }
 
-  const workspace = workspaceQuery.data;
+  const workspace = workspaceQuery.data ?? null;
   const onAction = (operation: () => Promise<unknown>) => {
     setNotice(null);
     action.mutate(operation);

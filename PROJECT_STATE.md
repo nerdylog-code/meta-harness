@@ -113,8 +113,8 @@ nothing today bounds what a migrated agent may execute. The handoff rendering no
 acknowledgement instead of open work, which is the right ask for a transfer -- but a scratch
 directory is not a sandbox, and the script says so.
 
-**445 tests green locally** across 8 suites (v1 21, unit 48, contracts 113, store 57, integration
-140, replay 21, conformance 34, desktop 11) and the CI matrix is green on `ubuntu-latest` and
+**476 tests green locally** across 8 suites (v1 21, unit 63, contracts 113, store 57, integration
+156, replay 21, conformance 34, desktop 11) and the CI matrix is green on `ubuntu-latest` and
 `windows-latest`. `master` and the tag `v0.1-hermes-hosted` are untouched.
 
 | WP | State |
@@ -157,6 +157,37 @@ automatically. Boot reconciliation settles leases for real now — an expired le
 lease whose run is no longer alive is released explicitly, each as an event — so `leases_released` is
 a measured number instead of the placeholder zero it used to be.
 
+**Workboard — complete.** The operational view of the canonical work graph: every task of a mission
+in a lane, with what is known about it and nothing invented. It is a **view**, composed on read from
+projections that already exist -- there is no `board_items` table and no second source of truth. The
+columns, the waves and the explanations all come from `metaharness_contracts.taskgraph`, so the
+daemon, the replay and the browser cannot disagree about where a task belongs:
+
+* `board_lane` is total over every canonical `TaskState`, and **failed and cancelled get their own
+  terminal lanes** instead of being folded into DONE -- a board that hides failed work lies by
+  omission.
+* `effective_lane` folds readiness into the state: a task whose state says it could start but whose
+  dependencies are not satisfied is **WAITING**, or **BLOCKED** when a dependency has already failed.
+  A board that put it in READY would be offering work the daemon refuses to start.
+* `waves` lays the DAG out in deterministic layers and refuses a cyclic graph rather than drawing one.
+  There is one implementation, in the contract, so the browser never computes a divergent topology.
+
+An approval and an artifact now record the mission and task the canonical envelope already named, so
+"maybe this approval is about that task" stopped being a guess: a pending approval for one task never
+appears on another, and artifacts are counted by scope rather than by proximity. Rows predating the
+columns keep NULL, which the board reports as **degraded** rather than inventing a scope. **Unknown is
+not zero**: usage is reported only when a real `usage.sampled` event exists for the run, workspace
+dirtiness is read as the last recorded measurement, and the board never runs `git status`, hashes an
+artifact or probes a runtime per card. Empty and degraded states are explicit -- an empty mission, a
+lane with no cards, a missing or conflicting workspace, filters hiding everything, and a connection
+state that distinguishes live from degraded.
+
+The UI renders one column per lane the daemon returned and recomputes nothing: **no drag and drop
+exists, on purpose** (moving a card between columns is not a state transition), actions are explicit
+buttons, and a refusal is shown with the daemon''s own detail string. Live updates refetch the board
+when a `task.*`, `workspace.*`, `approval.*`, `artifact.*`, `run.*` or `usage.*` event arrives, with
+no client-side event-sourced task store.
+
 ## Working (verified in this checkout)
 
 - **Daemon** `apps/daemon/metaharness`: `GET /health`, `GET /version`, `GET /v1/events`, `WS /v1/events/ws` (+ `/events/ws` alias), loopback-only guard, optional static mount of the web bundle.
@@ -194,7 +225,7 @@ a measured number instead of the placeholder zero it used to be.
   say why they are unavailable, five canonical budgets with per-dimension enforcement levels, and
   `tests/integration/sandbox/test_execution_boundary.py` (10 tests, 1 skip where no strong provider
   exists). `scripts/e2e_m3.py` exits 0 with 31 checks against the real runtime.
-- **Tests**: v1 regression 21/21 · unit 48/48 (includes the 14 work-graph rule tests) · contracts 113/113 · store 57/57 · integration 140/140 (agents 10, migration 10, tasks 20, approvals 16, artifacts 16, workspaces 24, execution-boundary 10, event-stream 4, process-supervisor 13, pi-transport 17) · replay 21/21 (reconciliation 10, equivalence 5, restart-and-crash 6) · conformance 34/34 (2 skips, by design) · desktop 11/11 — **445 measured by `scripts/test.py`**, which is the only number to trust: earlier notes in this file quoted a total that was never counted, and this one was read off the runner's own output. The suites exercise a real server, real websockets, real process trees and real hard kills; the whole default run is ~2 min.
+- **Tests**: v1 regression 21/21 · unit 63/63 (work-graph rules, board placement, waves and explanations) · contracts 113/113 · store 57/57 · integration 156/156 (agents 10, migration 10, tasks 20, board 16, approvals 16, artifacts 16, workspaces 24, execution-boundary 10, event-stream 4, process-supervisor 13, pi-transport 17) · replay 21/21 (reconciliation 10, equivalence 5, restart-and-crash 6) · conformance 34/34 (2 skips, by design) · desktop 11/11 — **476 measured by `scripts/test.py`**, which is the only number to trust: earlier notes in this file quoted a total that was never counted, and this one was read off the runner's own output. The suites exercise a real server, real websockets, real process trees and real hard kills; the whole default run is ~2 min.
 - **ProcessSupervisor** `apps/daemon/metaharness/process`: one interface, two OS implementations, pre-signal tree snapshot, verified kill (`orphan_check` inside the emitted event), bounded streams, wall-timeout budget. Design and the orphan bug it fixed: `docs/architecture/PROCESS_SUPERVISION.md`.
 - **Web shell** `apps/web` (WP-006): Vite + React + TS + TanStack Query + TanStack Router (code-based routes), one websocket owned by a context provider, connection state that distinguishes live from degraded from connecting, an event inspector that always says whether it is showing the live socket or the durable backlog, and a sidebar that marks unbuilt surfaces as `soon` instead of linking to nowhere. Built bundle is served by the daemon with an SPA fallback; deep links work and path traversal is refused (403, verified with `curl --path-as-is`). DOM verified in headless Chromium: the shell renders, the badge reads `live`, and the log's events appear.
 - **CI** `.github/workflows/ci.yml`: matrix `ubuntu-latest` + `windows-latest`, seven suites (v1, unit, contracts, store, integration, replay, conformance), plus a web job gated on `apps/web/package.json`.
@@ -203,7 +234,7 @@ a measured number instead of the placeholder zero it used to be.
 
 No context engine, no plugin kernel, no secrets broker, no channels, no voice, no RAG, no auth
 token enforcement (the enforced property today is **loopback-only**), no authenticated actor identity (the API cannot prove who is
-asking), no selective egress filtering, and no Workboard or Canvas surface yet.
+asking), no selective egress filtering, and no Canvas surface yet.
 
 **Runtimes:** Pi (`pi --mode rpc`) and **Hermes (`hermes acp`)** are implemented adapters with
 conformance suites (ADR-0006, ADR-0016, `docs/protocols/`). OpenClaw and OMP are still adapters on
@@ -212,15 +243,19 @@ paper. The desktop shell exists: a window plus a Python host (ADR-0009,
 
 ## Next
 
-**Workboard** (the current one). The order the Architect set: **Approvals → Artifact Inspector →
-Worktree Allocator → Workboard → Canvas V1 → Live Workspace plumbing → Human ↔ Agent takeover.**
-Work, authority, evidence and now isolated working copies with a single writer exist. What comes next
-is the board that shows all of it at once: tasks by state, their waves, their workspace and who holds
-the lease, and what is blocked on what. The lease was designed so that takeover can be built on top of
-it — release generation N, then an authenticated actor acquires N+1 — but **Take control / Hand back
-does not start before S2 gives actors an identity**, and **S2 — selective egress + control plane auth**
-stays registered before Swarm, because it is also what makes the approver's identity and per-task
-artifact access verifiable.
+**Canvas V1** (the current one). The order the Architect set, revised so that identity comes before
+mutation: **Workboard → Canvas V1 → S2 (auth + selective egress) → Live Workspace → Human ↔ Agent
+takeover.** Work, authority, evidence, isolated working copies with a single writer, and now the board
+that shows all of them at once all exist -- which means the Canvas has every entity it needs to be
+operational from its first version rather than decorative: Tasks, Agents, Approvals, Artifacts,
+Workspaces, Runs and WriterLeases.
+
+The lease was designed so that takeover can be built on top of it -- release generation N, then an
+authenticated actor acquires N+1 -- and **S2 moved ahead of mutating takeover on purpose**: the
+control plane still cannot prove who is asking, so building "take the wheel" on top of a `run_id` a
+client simply asserts would be a beautiful experience resting on a claim. A read-only live preview may
+be explored during Canvas design; **control transfer does not ship before an actor identity exists**,
+and Swarm/Factory stay blocked until S2 as well.
 
 **S2 — Selective Egress + Control Plane Auth** is registered as the next security gate, before
 Swarm/Factory, and deliberately not built yet: the S1 run showed an agent with an open network

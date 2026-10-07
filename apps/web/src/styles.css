@@ -482,3 +482,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 .workboard-waves > div { display: flex; flex-direction: column; gap: 0.25rem; max-width: 100%; padding: 0.45rem; border: 1px solid var(--line); overflow-wrap: anywhere; }
 .workboard-waves strong { color: var(--accent); }
 @media (max-width: 760px) { .workboard-filters { align-items: flex-start; flex-direction: column; } .workboard-filters select { max-width: 100%; } }
+
+.row-focus {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
