@@ -139,6 +139,46 @@ class WorkGraphTest(unittest.TestCase):
         self.client.post(f"/v1/tasks/{task}/start", json={"run_id": "run_abc"})
         self.assertEqual(self.client.get(f"/v1/tasks/{task}").json()["run_id"], "run_abc")
 
+    def test_a7_the_whole_scenario_in_one_chain(self) -> None:
+        """The Architect's end-to-end scenario, in one test: create, gate, assign, run, evidence, restart.
+
+        It repeats what A1-A6 assert separately on purpose. Those prove each rule; this proves the
+        chain a real mission walks, including that the graph after a restart is the same graph.
+        """
+        agent = self.client.post("/v1/agents", json={"display_name": "Nova"}).json()["agent_id"]
+        ids = self.diamond()
+
+        self.assertEqual(self.graph()["ready"], [ids["a"]], "only A is ready")
+        self.finish(ids["a"])
+        self.assertEqual(sorted(self.graph()["ready"]), sorted([ids["b"], ids["c"]]), "A released B and C")
+        self.assertEqual(self.state_of(ids["d"]), "draft", "D waits for both")
+
+        assigned = self.client.post(f"/v1/tasks/{ids['b']}/assign", json={"agent_id": agent})
+        self.assertEqual(assigned.status_code, 200, assigned.text)
+        started = self.client.post(f"/v1/tasks/{ids['b']}/start", json={"run_id": "run_b"})
+        self.assertEqual(started.status_code, 200, started.text)
+        completed = self.client.post(
+            f"/v1/tasks/{ids['b']}/complete",
+            json={"run_id": "run_b", "proof": ["build.log", "artifact://b"], "artifacts": ["artifact://b"]},
+        )
+        self.assertEqual(completed.status_code, 200, completed.text)
+        self.finish(ids["c"])
+        self.assertEqual(self.graph()["ready"], [ids["d"]], "D is ready once B and C are done")
+
+        before = self.graph()
+        self.client.__exit__(None, None, None)
+        self.client = TestClient(create_app(Settings(port=0, data_dir=self._tmp.name, serve_web=False)))
+        self.client.__enter__()
+        after = self.graph()
+        self.assertEqual(
+            [(task["id"], task["state"], task["dependencies"], task["run_id"]) for task in after["tasks"]],
+            [(task["id"], task["state"], task["dependencies"], task["run_id"]) for task in before["tasks"]],
+            "the reconstructed graph is identical, including the run that executed B",
+        )
+        self.assertEqual(after["ready"], before["ready"])
+        task_b = self.client.get(f"/v1/tasks/{ids['b']}").json()
+        self.assertIn("build.log", task_b["proof"], "the evidence survived the restart")
+
     # ------------------------------------------------------------------ refusals
 
     def test_b1_a_cycle_is_refused(self) -> None:
