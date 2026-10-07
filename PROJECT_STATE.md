@@ -113,8 +113,8 @@ nothing today bounds what a migrated agent may execute. The handoff rendering no
 acknowledgement instead of open work, which is the right ask for a transfer -- but a scratch
 directory is not a sandbox, and the script says so.
 
-**476 tests green locally** across 8 suites (v1 21, unit 63, contracts 113, store 57, integration
-156, replay 21, conformance 34, desktop 11) and the CI matrix is green on `ubuntu-latest` and
+**477 tests green locally** across 8 suites (v1 21, unit 63, contracts 113, store 57, integration
+157, replay 21, conformance 34, desktop 11) and the CI matrix is green on `ubuntu-latest` and
 `windows-latest`. `master` and the tag `v0.1-hermes-hosted` are untouched.
 
 | WP | State |
@@ -225,7 +225,7 @@ no client-side event-sourced task store.
   say why they are unavailable, five canonical budgets with per-dimension enforcement levels, and
   `tests/integration/sandbox/test_execution_boundary.py` (10 tests, 1 skip where no strong provider
   exists). `scripts/e2e_m3.py` exits 0 with 31 checks against the real runtime.
-- **Tests**: v1 regression 21/21 · unit 63/63 (work-graph rules, board placement, waves and explanations) · contracts 113/113 · store 57/57 · integration 156/156 (agents 10, migration 10, tasks 20, board 16, approvals 16, artifacts 16, workspaces 24, execution-boundary 10, event-stream 4, process-supervisor 13, pi-transport 17) · replay 21/21 (reconciliation 10, equivalence 5, restart-and-crash 6) · conformance 34/34 (2 skips, by design) · desktop 11/11 — **476 measured by `scripts/test.py`**, which is the only number to trust: earlier notes in this file quoted a total that was never counted, and this one was read off the runner's own output. The suites exercise a real server, real websockets, real process trees and real hard kills; the whole default run is ~2 min.
+- **Tests**: v1 regression 21/21 · unit 63/63 (work-graph rules, board placement, waves and explanations) · contracts 113/113 · store 57/57 · integration 157/157 (agents 10, migration 10, tasks 20, board 17, approvals 16, artifacts 16, workspaces 24, execution-boundary 10, event-stream 4, process-supervisor 13, pi-transport 17) · replay 21/21 (reconciliation 10, equivalence 5, restart-and-crash 6) · conformance 34/34 (2 skips, by design) · desktop 11/11 — **477 measured by `scripts/test.py`**, which is the only number to trust: earlier notes in this file quoted a total that was never counted, and this one was read off the runner's own output. The suites exercise a real server, real websockets, real process trees and real hard kills; the whole default run is ~2 min.
 - **ProcessSupervisor** `apps/daemon/metaharness/process`: one interface, two OS implementations, pre-signal tree snapshot, verified kill (`orphan_check` inside the emitted event), bounded streams, wall-timeout budget. Design and the orphan bug it fixed: `docs/architecture/PROCESS_SUPERVISION.md`.
 - **Web shell** `apps/web` (WP-006): Vite + React + TS + TanStack Query + TanStack Router (code-based routes), one websocket owned by a context provider, connection state that distinguishes live from degraded from connecting, an event inspector that always says whether it is showing the live socket or the durable backlog, and a sidebar that marks unbuilt surfaces as `soon` instead of linking to nowhere. Built bundle is served by the daemon with an SPA fallback; deep links work and path traversal is refused (403, verified with `curl --path-as-is`). DOM verified in headless Chromium: the shell renders, the badge reads `live`, and the log's events appear.
 - **CI** `.github/workflows/ci.yml`: matrix `ubuntu-latest` + `windows-latest`, seven suites (v1, unit, contracts, store, integration, replay, conformance), plus a web job gated on `apps/web/package.json`.
