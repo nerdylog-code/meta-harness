@@ -262,6 +262,11 @@ The important principle is:
 23. No core feature may require WSL.
 24. No feature is complete without cancellation behavior.
 25. No agent is published without permissions and evals.
+26. Paid cloud computers are optional; the core live-agent computer experience has a local path.
+27. Voice has a usable free/local path before premium realtime providers are required.
+28. Communication endpoints belong to Agent identity, not to a Runtime or Session.
+29. "Alive" means persistent presence and attention, not continuous token burn.
+30. A visible computer screen is a work surface, never by itself a security boundary.
 
 ---
 
@@ -859,6 +864,7 @@ MemoryProvider
 RagProvider
 SandboxProvider
 WorkspaceProvider
+ComputerProvider
 ChannelProvider
 VoiceProvider
 WorkflowProvider
@@ -1054,21 +1060,88 @@ L6 Raw Archive
 
 ---
 
-# 25. HEARTBEAT SYSTEM
+# 25. LIVING AGENT PRESENCE
 
-## Runtime Healthbeat
+The product should make an Agent feel present and reachable without keeping an expensive model turn
+running forever.
 
-Deterministic.
+"Alive" means durable identity + current state + attention + communication + memory + routines +
+work surfaces. It does **not** mean an LLM is continuously consuming tokens.
 
-## Task Lease Heartbeat
+## Runtime Heartbeat
 
-Deterministic.
+Deterministic health and capability checks.
+
+## Task / Writer Lease Heartbeat
+
+Deterministic lease renewal and stale-writer detection.
 
 ## Agent Attention Heartbeat
 
-May invoke cheap model, but receives isolated light context only.
+May invoke a cheap model, but receives isolated light context only.
 
 No full transcript by default.
+
+A heartbeat may deliver a useful result to an Agent's configured communication endpoint, but the
+execution context and the delivery channel remain separate concepts.
+
+## Routines
+
+Time-based recurring work:
+
+```text
+schedule
+→ create/wake Task
+→ run under normal budgets/policies
+→ publish result
+→ optionally deliver to a Channel
+```
+
+Examples:
+
+- weekday CI check;
+- morning inbox summary;
+- nightly repository scan;
+- periodic project status report.
+
+## Watches
+
+Condition-based attention:
+
+```text
+external/canonical signal
+→ deterministic condition check
+→ wake Agent / create Task
+→ optional Channel notification
+```
+
+Examples:
+
+- PR received review;
+- build failed;
+- approval granted;
+- monitored file/event changed;
+- inbox contains a matching message.
+
+Watches must not become unbounded model polling. Prefer event/webhook/deterministic checks whenever
+possible.
+
+## Presence State
+
+The UI may project a compact presence such as:
+
+```text
+offline
+idle
+listening
+working
+waiting_human
+blocked
+speaking
+```
+
+Presence is derived from real sessions/runs/control state; it is not a second canonical state
+machine invented by the renderer.
 
 ---
 
@@ -1410,6 +1483,94 @@ must all be representable on the same Mission surface.
 Live activity represents real events. Removing or creating an edge changes future routing,
 dependencies or permissions only after the daemon accepts the mutation at a safe boundary.
 
+## 31.7 LOCAL COMPUTER / BOT SCREEN
+
+The core product must provide a **zero-cloud-cost path** to a visible Agent computer surface.
+
+A paid hosted computer is optional, never required.
+
+Delivery modes:
+
+```text
+Host Assist
+  Agent operates the user's own machine, explicitly enabled and policy-bounded.
+
+Local Bot Screen
+  Agent receives a dedicated local desktop/work surface that is streamed into Meta-Harness.
+
+Remote Computer
+  Optional future provider: SSH / user-owned server / VM / cloud-computer service.
+```
+
+### Host Assist
+
+Initial practical mode for Windows and Linux.
+
+A `ComputerProvider` may expose structured background computer-use capabilities such as:
+
+```text
+inspect accessibility tree
+capture screen
+click
+type
+scroll
+drag
+open/focus application
+browser interaction
+```
+
+Prefer open-source/local drivers. A runtime-specific implementation such as Hermes computer-use can
+be bridged when available, but the Meta-Harness contract must remain runtime-neutral.
+
+Host Assist is explicit opt-in. It does not gain authority merely because the Agent can see the
+desktop; normal risk/approval rules still apply.
+
+### Local Bot Screen
+
+Target experience:
+
+```text
+Agent
+→ local isolated execution environment
+→ lightweight desktop + browser
+→ screen streamed into Meta-Harness
+→ human can watch
+→ Take control
+→ Hand back
+```
+
+On Linux, an open-source implementation may use a lightweight desktop plus a local VNC/RFB stack
+and Chromium inside the Agent's execution boundary. The exact implementation is replaceable.
+
+The viewer binds locally/private IPC by default. It must never expose a VNC/RFB service publicly just
+to make the preview work.
+
+On Windows, Host Assist is the first-class early path; a dedicated isolated local desktop may arrive
+later behind the same `ComputerProvider` contract. Cross-platform product semantics remain the same
+even when enforcement strength differs.
+
+A screen is a **work surface, not a security boundary**. The effective filesystem/process/network
+isolation continues to come from S1/S2 and the selected SandboxProvider.
+
+### Computer control arbitration
+
+Human and Agent control must be explicit.
+
+```text
+AGENT CONTROL
+→ Take control
+→ HUMAN CONTROL
+→ Hand back
+→ AGENT CONTROL
+```
+
+When human control is active, Agent computer-input tools are refused or paused at a safe boundary.
+
+This control ownership is separate from the Git WriterLease: one governs GUI input; the other
+governs repository mutation. A Live Workspace may need both.
+
+The control state must be observable and evented. No UI-only mutex.
+
 ---
 
 # 32. ORCHESTRATION TOPOLOGIES
@@ -1641,21 +1802,75 @@ Never expose provider keys to renderer.
 
 ---
 
-# 42. CHANNELS
+# 42. COMMUNICATION CHANNELS
 
-Plugin contract for:
+Communication belongs to the persistent Agent identity, not to one Runtime or Session.
+
+An Agent may expose multiple contact endpoints:
 
 ```text
-Web
+Web / Desktop
 WhatsApp
 Telegram
 Discord
 Slack
+Signal
+Email
+SMS / iMessage bridge
 CLI
 Webhook
+future phone/telephony provider
 ```
 
-Inbound messages normalize to `ChannelMessage`.
+Inbound messages normalize to `ChannelMessage` and are routed to the target `agt_` identity.
+The control plane chooses the active Session/Runtime according to policy; the channel must not own
+Agent identity.
+
+Outbound side effects obey normal risk levels and Approval binding.
+
+Examples:
+
+```text
+read inbound message        → usually R0/R1 policy
+draft response              → reversible/local
+send external message       → R3 external side effect
+delete external data        → R3/R4 depending on impact
+payment/credential action   → R4
+```
+
+The UI should expose a contact surface per Agent:
+
+```text
+Nova
+├── Chat
+├── Voice / Call Agent
+├── WhatsApp
+├── Telegram
+├── Email
+├── Slack
+└── configured endpoints
+```
+
+The initial product does not need to provide a paid phone number. PSTN/SMS providers remain optional
+plugins. A free local "Call Agent" experience inside the desktop/web product is part of the core
+voice path.
+
+## 42.1 Channel delivery + presence
+
+Heartbeats, Routines and Watches may target a configured Channel without making that Channel the
+execution context.
+
+This enables an Agent to feel alive:
+
+```text
+watch detects event
+→ Agent wakes
+→ bounded work
+→ result/event
+→ notify last/selected communication endpoint
+```
+
+Delivery must be explicit. Do not spray proactive messages across every connected channel.
 
 ---
 
@@ -1663,29 +1878,139 @@ Inbound messages normalize to `ChannelMessage`.
 
 Stage 1:
 
-Use OpenClaw as a channel bridge.
+Use OpenClaw as a ChannelProvider bridge where practical. OpenClaw already specializes in keeping
+messaging channels connected and can remain outside the kernel.
 
 Stage 2:
 
 Optional native WhatsApp plugin.
 
-Channel implementation must not change the kernel.
+The same pattern may apply to other channels: reuse a strong existing gateway first, then add native
+providers only when product value justifies the maintenance burden.
+
+Channel implementation must not change the kernel or Agent identity.
 
 ---
 
-# 44. VOICE
+# 44. VOICE & REAL-TIME CONVERSATION
+
+Voice is a first-class way to talk to an Agent, but it must have a **free/local default path**.
+
+## 44.1 Voice V1 — chained, local-first
+
+Default architecture:
 
 ```text
-STT
-Realtime Voice
-Full Agent
-TTS
-Channel
+Microphone
+→ STT
+→ text Message
+→ full Meta-Harness Agent
+→ streaming text
+→ TTS
+→ speaker
 ```
 
-Simple conversational turns stay fast.
+Initial zero/low-cost provider preference:
 
-Deep/tool/memory questions consult the full agent.
+```text
+STT:
+  local faster-whisper / compatible local Whisper implementation
+
+TTS:
+  free/local provider where available
+  Edge TTS as a free network-backed fallback
+  Piper / NeuTTS / other open providers behind VoiceProvider
+```
+
+The exact speech engine is replaceable. The Agent/session model does not change when STT/TTS
+providers change.
+
+Voice messages received through messaging channels follow the same normalization:
+
+```text
+audio attachment
+→ STT
+→ ChannelMessage/text
+→ Agent
+→ optional TTS/audio reply
+```
+
+## 44.2 Call Agent
+
+The desktop/web product should expose a direct **Call Agent** mode:
+
+```text
+[ Call Nova ]
+      ↓
+microphone + speaker session
+      ↓
+live transcript
+      ↓
+Agent responses + tool activity
+```
+
+This is an in-product audio session and requires no telephone number.
+
+V1 may be push-to-talk or turn-based with silence detection.
+
+Later, a full-duplex realtime VoiceProvider may add interruption, backchanneling and lower latency,
+but it is optional and must not replace the full Agent. If a lightweight realtime voice model is
+used, consequential/tool work delegates to the canonical Agent/Run under normal policies.
+
+## 44.3 Wake word
+
+Optional local wake word:
+
+```text
+"Hey Nova"
+→ local detector
+→ open/activate voice session
+```
+
+Wake-word detection should run locally when practical and must be explicitly enabled. Continuous raw
+microphone recording is not a hidden default.
+
+## 44.4 Voice identity
+
+An Agent may have:
+
+```text
+voice provider
+voice id / local voice profile
+language
+speaking rate
+style hints
+STT policy
+TTS policy
+voice channel policy
+```
+
+These belong to AgentVersion/configuration, not to one Session.
+
+## 44.5 Telephony
+
+Real telephone/SMS calling is optional because it usually introduces external provider cost.
+
+Model it as ChannelProvider / VoiceProvider integration so users may attach:
+
+```text
+self-hosted SIP
+user-supplied telephony API
+future phone provider
+```
+
+Core Meta-Harness must remain useful without paying for telephony.
+
+## 44.6 Voice safety and observability
+
+Voice is another input/output surface, not a policy bypass.
+
+- risky tool calls still need Approval;
+- spoken confirmation alone is not automatically identity proof;
+- transcript provenance should say STT/provider/measured source;
+- voice latency/cost/usage are observable;
+- interruption/cancel must stop the active speech/run path cleanly;
+- secrets must not be copied into renderer logs.
 
 ---
 
@@ -2373,13 +2698,17 @@ Pi/Hermes/OpenClaw/OMP coexist in same Mission.
 Expected:
 Central thesis proven.
 
-## PHASE 15 — Heartbeat
+## PHASE 15 — Agent Presence / Heartbeat
+
+Build runtime/task heartbeats, bounded Agent attention, Routines and Watches.
 
 Gate:
-agent heartbeat uses light isolated context.
+Agent heartbeat uses light isolated context; one Routine and one Watch wake the correct Agent without
+replaying the full transcript.
 
 Expected:
-Persistent awareness at controlled cost.
+Persistent awareness at controlled cost — an Agent can remain "alive" while idle without continuous
+model spend.
 
 ## PHASE 16 — Ask Meta-Harness
 
@@ -2421,21 +2750,28 @@ bad candidate fails regression and cannot promote.
 Expected:
 Controlled learning.
 
-## PHASE 21 — Channels
+## PHASE 21 — Communication Channels
+
+Build Agent-bound communication endpoints. Prefer bridges/providers over kernel-specific channel
+logic.
 
 Gate:
-WhatsApp round-trip to correct Agent identity.
+one external messaging path round-trips to the correct persistent Agent identity and one proactive
+Watch/Heartbeat can deliver to an explicitly selected endpoint.
 
 Expected:
-Daily communication integration.
+The Agent is reachable outside the main UI without becoming tied to that channel.
 
-## PHASE 22 — Voice
+## PHASE 22 — Voice / Call Agent
+
+Start with the free/local chained path: microphone → local STT → full Agent → free/local TTS.
 
 Gate:
-simple query local/realtime; deep query consults full Agent.
+a user can call/talk to a named Agent from the product, see the live transcript, hear the reply, and
+a deep/tool request executes through the same canonical Agent/Task/Approval path.
 
 Expected:
-Natural low-latency interaction.
+Natural conversation without requiring a paid realtime voice or telephone provider.
 
 ## PHASE 23 — RAG Lab
 
@@ -2521,8 +2857,11 @@ Ask Meta-Harness
 usage/cost
 Fusion
 basic Agent Factory
-one WhatsApp path
-one Voice path
+one external messaging path (WhatsApp preferred)
+local/free Voice path with Call Agent
+local computer-use path
+visible Agent computer/screen surface
+Routines + Watches
 small HarnessBench
 ```
 
@@ -2543,6 +2882,9 @@ Eval Lab
 Training Lab
 multi-channel
 voice providers
+optional telephony
+ComputerProvider SDK
+dedicated Local Bot Screen
 remote daemon
 plugin registry
 advanced HarnessBench
@@ -2989,21 +3331,22 @@ Show:
 4. Four runtimes.
 5. Architect creates DAG.
 6. Builders receive worktrees.
-7. Canvas animates and shows the canonical Work Graph.
-8. Human opens a live workspace, briefly takes control from an Agent, tests/changes the same
-   application surface, and hands the writer lease back.
-10. Workboard updates.
-9. One agent reaches pressure.
-11. Capsule generated.
-12. Context compacts.
-13. Agent continues.
-14. Reviewer blocks.
-15. Builder fixes.
-16. Usage compared.
-17. Ask explains.
-18. WhatsApp interacts.
-19. Voice interacts.
-20. Mission completes with proof.
+7. Workboard updates from canonical state.
+8. Canvas animates and shows the canonical Work Graph.
+9. Open Nova's live local computer/workspace screen.
+10. Watch Nova operate the app/browser.
+11. Human takes control, tests or changes something, then hands control back.
+12. Speak to Nova with Call Agent; live transcript appears and Nova answers with TTS.
+13. Send Nova a message through an external channel and receive the reply on the same Agent identity.
+14. A Watch wakes an idle Agent and delivers a useful notification without replaying the full transcript.
+15. One Agent reaches context pressure.
+16. Context Capsule is generated.
+17. Context compacts and the same Agent continues.
+18. Reviewer blocks a result.
+19. Builder fixes it.
+20. Usage/cost is compared with provenance.
+21. Ask Meta-Harness explains why work stopped or changed.
+22. Mission completes with proof.
 
 ---
 
@@ -3042,27 +3385,33 @@ governance dashboards
 9 Worktrees
 10 Control UI
 11 Workboard
-12 Canvas
-13 Hermes
-14 OpenClaw
-15 OMP
-16 Multi-runtime
-17 Heartbeats
-18 Ask
-19 Fusion
-20 Swarm
-21 Agent Factory
-22 Self-improvement
-23 Channels
-24 Voice
-25 RAG
-26 LangGraph
-27 HarnessBench
-28 Training Lab
-29 Packaging
-30 Security
-31 Portfolio
+12 Canvas V1
+13 Security Gate S2 (actor auth + selective egress)
+14 Local Computer / Live Workspace
+15 Human ↔ Agent control transfer
+16 Hermes
+17 OpenClaw
+18 OMP
+19 Multi-runtime
+20 Agent Presence / Heartbeats / Routines / Watches
+21 Ask
+22 Communication Channels
+23 Voice / Call Agent
+24 Fusion
+25 Swarm
+26 Agent Factory
+27 Self-improvement
+28 RAG
+29 LangGraph
+30 HarnessBench
+31 Training Lab
+32 Packaging
+33 Security hardening
+34 Portfolio
 ```
+
+Paid cloud computers and paid telephony are deliberately outside the required path. The core
+experience must work with the user's own machine and/or a local open-source Bot Screen.
 
 ---
 
@@ -3139,6 +3488,9 @@ The user should be able to:
 - evaluate its quality;
 - improve it safely;
 - communicate through chat, channels and voice;
+- call a named Agent and hear it answer;
+- observe and, when authorised, share control of its computer/work surface;
+- keep Agents attentive through heartbeats, Routines and Watches without continuous model spend;
 - compare efficiency;
 - orchestrate teams and factories;
 - keep the system understandable.
