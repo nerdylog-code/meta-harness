@@ -23,6 +23,7 @@ Numbering policy: **numbers reserved by PROJECT_BOOK §Appendix A are kept for t
 | 0017 | Event envelope: fixed keys, versioned payloads, tolerant edges | **accepted** 2026-10-05 | `ADR-0017-event-envelope.md` |
 | 0018 | The Context Capsule is the migration transfer object | **accepted** 2026-10-06 | `ADR-0018-capsule-as-transfer-object.md` |
 | 0019 | Execution enforcement: requested/effective/evidence, per-dimension levels, budgets that say how they are enforced | **accepted** 2026-10-06 | `ADR-0019-execution-enforcement.md` |
+| 0020 | Control plane authentication and selective egress: S2A actor identity, opaque per-launch tokens, single-use bootstrap, CSRF/Origin/Host, minimal public health; S2B an egress broker as the only connected path, hostname allowlist with boundary matching, private-address and DNS-rebinding refusal, CONNECT bound to TLS SNI | **accepted** 2026-10-07 | `ADR-0020-control-plane-auth-and-selective-egress.md` |
 
 **0016 and 0017 exist because the Book's Appendix A does not name a decision for transport selection or for the envelope's payload-versioning rule.** Rather than reuse a reserved number (which would recreate the ambiguity C7 was about), the next free numbers are used.
 
