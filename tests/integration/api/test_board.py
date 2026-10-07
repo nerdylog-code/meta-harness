@@ -304,6 +304,15 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(self.card(a)["artifacts"]["count"], 2)
         self.assertEqual(self.card(b)["artifacts"]["count"], 1, "counted by scope, never by proximity")
 
+    def test_b3b_artifact_ids_are_the_tasks_own(self) -> None:
+        """The card carries ids the inspector can open -- and they are this task's, never a neighbour's."""
+        a, b = self.task("A"), self.task("B")
+        first = self.artifact(a)
+        second = self.artifact(b)
+        self.assertEqual(self.card(a)["artifacts"]["ids"], [first])
+        self.assertEqual(self.card(b)["artifacts"]["ids"], [second])
+        self.assertNotIn(second, self.card(a)["artifacts"]["ids"])
+
     def test_b4_unknown_usage_stays_unknown(self) -> None:
         a = self.task("A")
         self.assertIsNone(self.card(a)["usage"], "a task with no measured usage reports nothing, not zero")

@@ -48,23 +48,23 @@ function BoardCard({ task, missionId, onAction }: {
       <span className={stateClass(task.state)}>{task.state}</span>
     </header>
     {task.agent ? <p className="workboard-line">agent: <a href={`/agents/${encodeURIComponent(task.agent.id)}`} className="mono">{task.agent.id}</a></p> : null}
-    {task.run ? <p className="workboard-line">run: <a className="mono" href={`/events?run_id=${encodeURIComponent(task.run.run_id)}`}>{task.run.run_id}</a>{task.run.runtime_id ? ` · runtime ${task.run.runtime_id}` : ""}{task.run.provider || task.run.model ? ` · ${[task.run.provider, task.run.model].filter(Boolean).join("/")}` : ""}{task.run.note ? ` · ${task.run.note}` : ""}</p> : null}
+    {task.run ? <p className="workboard-line">run: <a className="mono" href="/events">{task.run.run_id}</a>{task.run.runtime_id ? ` · runtime ${task.run.runtime_id}` : ""}{task.run.provider || task.run.model ? ` · ${[task.run.provider, task.run.model].filter(Boolean).join("/")}` : ""}{task.run.note ? ` · ${task.run.note}` : ""}</p> : null}
     {workspace ? <div className="workboard-line">workspace: <a href={`/missions/${encodeURIComponent(missionId)}?workspace=${encodeURIComponent(task.task_id)}`} className="mono workboard-locator">{workspace.locator}</a> · {workspace.provider} · {workspace.state}
       {(workspace.state === "missing" || workspace.state === "conflict") && workspace.note ? <p className="tight warn">{workspace.note}</p> : null}
       <p className="tight faint">dirty: {workspace.dirty === null ? "not measured" : workspace.dirty ? "yes" : "no"}</p>
     </div> : null}
     {writer ? <p className={`workboard-line ${writer.expired ? "warn" : ""}`}>writer: {writer.expired ? "EXPIRED" : writer.active ? "active" : writer.state} · <span className="mono">{writer.run_id}</span> · generation {writer.generation} · expires {formatTimestamp(writer.expires_at)}</p> : null}
-    <p className="workboard-line">artifacts: <a href={`/artifacts?task_id=${encodeURIComponent(task.task_id)}`}>{task.artifacts.count} existing</a>{task.artifacts.recorded !== task.artifacts.count ? ` · ${task.artifacts.recorded} recorded` : ""} · {task.artifacts.proof} proof</p>
-    {task.approvals.pending > 0 ? <p className="workboard-line"><a className="badge badge-moderate" href={`/approvals?approval=${encodeURIComponent(approval?.id ?? "")}`}>APPROVAL REQUIRED{approval ? ` · ${approval.id}` : ""}</a></p> : null}
+    <p className="workboard-line">artifacts: {task.artifacts.ids.length > 0 ? <a href={`/artifacts/${encodeURIComponent(task.artifacts.ids[0])}`}>{task.artifacts.count} existing</a> : <span>{task.artifacts.count} existing</span>}{task.artifacts.recorded !== task.artifacts.count ? ` · ${task.artifacts.recorded} recorded` : ""} · {task.artifacts.proof} proof</p>
+    {task.approvals.pending > 0 ? <p className="workboard-line"><a className="badge badge-moderate" href="/approvals">APPROVAL REQUIRED{approval ? ` · ${approval.id}` : ""}</a></p> : null}
     {task.usage === null ? <p className="workboard-line faint">usage was not measured</p> : <p className="workboard-line faint">usage measured {formatTimestamp(task.usage.sampled_at)} · {JSON.stringify(task.usage.sample)}</p>}
     {task.reasons.length ? <ul className="workboard-reasons">{task.reasons.map((reason, index) => <li key={`${index}-${reason}`}>{reason}</li>)}</ul> : null}
     <div className="workboard-actions">
       <a href={`/missions/${encodeURIComponent(missionId)}?task=${encodeURIComponent(task.task_id)}`}>open task</a>
       {task.agent ? <a href={`/agents/${encodeURIComponent(task.agent.id)}`}>open agent</a> : null}
       {workspace ? <a href={`/missions/${encodeURIComponent(missionId)}?workspace=${encodeURIComponent(task.task_id)}`}>open workspace</a> : null}
-      <a href={`/artifacts?task_id=${encodeURIComponent(task.task_id)}`}>open artifacts</a>
-      {task.approvals.pending > 0 ? <a href={`/approvals?approval=${encodeURIComponent(approval?.id ?? "")}`}>open approvals</a> : null}
-      {task.run ? <a href={`/events?run_id=${encodeURIComponent(task.run.run_id)}`}>inspect run</a> : null}
+      {task.artifacts.ids.length > 0 ? <a href={`/artifacts/${encodeURIComponent(task.artifacts.ids[0])}`}>open artifacts</a> : null}
+      {task.approvals.pending > 0 ? <a href="/approvals">open approvals</a> : null}
+      {task.run ? <a href="/events">inspect run</a> : null}
       {task.state === "ready" ? <button type="button" onClick={() => onAction(task.task_id, "start")}>start</button> : null}
       {task.state === "running" ? <button type="button" onClick={() => onAction(task.task_id, "review")}>request review</button> : null}
       {!(["done", "failed", "cancelled"].includes(task.state)) ? <><button type="button" onClick={() => onAction(task.task_id, "fail")}>fail</button><button type="button" onClick={() => onAction(task.task_id, "cancel")}>cancel</button></> : null}

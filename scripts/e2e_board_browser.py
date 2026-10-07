@@ -241,6 +241,22 @@ def main() -> int:
         except Exception as error:  # noqa: BLE001
             check(False, "the card's open-task link lands on a task view", str(error))
 
+        # 4c. "open artifacts" reaches the inspector, because the card carries a real id
+        try:
+            page.goto(board_url, wait_until="networkidle")
+            time.sleep(1.0)
+            open_artifacts = page.get_by_role("link", name="open artifacts").first
+            artifacts_href = open_artifacts.get_attribute("href") or ""
+            check(artifacts_href.startswith("/artifacts/"), "the artifacts link points at the inspector", artifacts_href)
+            open_artifacts.click()
+            time.sleep(1.5)
+            landed_artifacts = page.inner_text("body")
+            check(artifact_id in landed_artifacts or "sha256" in landed_artifacts.lower(), "the inspector renders the artifact", page.url)
+            page.goto(board_url, wait_until="networkidle")
+            time.sleep(0.8)
+        except Exception as error:  # noqa: BLE001
+            check(False, "the artifacts link points at the inspector", str(error))
+
         # 5. the deep link survives a reload
         page.reload(wait_until="networkidle")
         time.sleep(1.5)

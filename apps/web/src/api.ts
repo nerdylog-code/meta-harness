@@ -483,7 +483,7 @@ export interface WorkboardTask {
     latest: { id: string } | null;
     expired_pending: string[];
   };
-  artifacts: { count: number; recorded: number; proof: number };
+  artifacts: { count: number; recorded: number; proof: number; ids: string[] };
   usage: { sample: Record<string, unknown>; sampled_at: number } | null;
   reasons: string[];
   wave: number | null;

@@ -193,7 +193,20 @@ def _card(store, task: dict[str, Any], deps: dict[str, list[str]], states: dict[
         "workspace": workspace,
         "writer": writer,
         "approvals": _approvals(store, task_id),
-        "artifacts": {"count": artifacts, "recorded": recorded, "proof": proof},
+        "artifacts": {
+            "count": artifacts,
+            "recorded": recorded,
+            "proof": proof,
+            # The inspector opens an artifact by id, so the card carries the ids it may open --
+            # bounded, because a board is not a file listing.
+            "ids": [
+                row["id"]
+                for row in store.rows(
+                    "SELECT id FROM artifacts WHERE task_id = ? ORDER BY created_ts LIMIT 20",
+                    (task_id,),
+                )
+            ],
+        },
         "usage": _usage(store, task.get("run_id")),
         "created_at": task["created_ts"],
         "updated_at": task["updated_ts"],
