@@ -354,3 +354,151 @@ export const cancelSession = (sessionId: string) =>
     `/v1/sessions/${encodeURIComponent(sessionId)}/cancel`,
     {},
   );
+
+// ------------------------------------------------------------------ work graph
+
+/**
+ * A task in a mission's dependency graph. The daemon is canonical: `ready` and `state` are
+ * computed server-side and never inferred here, and `dependencies`/`dependents` carry task
+ * ids that this module does not resolve -- the UI resolves them to titles for display.
+ */
+export interface MissionTask {
+  id: string;
+  mission_id: string;
+  title: string;
+  objective: string;
+  state: string;
+  status: string;
+  owner_agent: string | null;
+  assigned_agent_id: string | null;
+  run_id: string | null;
+  workspace_scope: string | null;
+  dependencies: string[];
+  dependents: string[];
+  ready: boolean;
+  created_at: number;
+  completed_at: number | null;
+  proof: string;
+  artifacts: string;
+  acceptance: string;
+}
+
+export interface MissionTasksPayload {
+  mission_id: string;
+  tasks: MissionTask[];
+  ready: string[];
+  blocked: string[];
+  order: string[];
+}
+
+/**
+ * A refusal from the daemon that carries a machine-readable status and the daemon's own detail
+ * string. A 409 (a cycle, an unmet dependency, an illegal transition) is a decision the server
+ * made, not a transport failure, and the UI must show the detail rather than swallow it.
+ */
+export class ApiRefusal extends Error {
+  readonly status: number;
+  readonly detail: string;
+
+  constructor(path: string, status: number, detail: string) {
+    super(`${path} refused ${status}: ${detail}`);
+    this.name = "ApiRefusal";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+/** POST/DELETE with the same shape as postJson, but refusals keep their status and detail. */
+async function sendJson<T>(method: "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method,
+    headers:
+      body === undefined
+        ? { accept: "application/json" }
+        : { "content-type": "application/json", accept: "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    let detail = text;
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && "detail" in parsed) {
+        const raw = (parsed as { detail: unknown }).detail;
+        if (typeof raw === "string") detail = raw;
+      }
+    } catch {
+      // not JSON: the raw body text is the detail
+    }
+    throw new ApiRefusal(path, response.status, detail.slice(0, 500));
+  }
+  return (await response.json()) as T;
+}
+
+export const fetchMissionTasks = (missionId: string) =>
+  getJson<MissionTasksPayload>(`/v1/missions/${encodeURIComponent(missionId)}/tasks`);
+
+export const fetchTask = (taskId: string) =>
+  getJson<MissionTask>(`/v1/tasks/${encodeURIComponent(taskId)}`);
+
+export const createTask = (
+  missionId: string,
+  input: {
+    title: string;
+    objective: string;
+    dependencies: string[];
+    requiresArtifact: boolean;
+    ownerAgent: string | null;
+  },
+) =>
+  sendJson<MissionTask>("POST", `/v1/missions/${encodeURIComponent(missionId)}/tasks`, {
+    title: input.title,
+    objective: input.objective,
+    dependencies: input.dependencies,
+    requires_artifact: input.requiresArtifact,
+    owner_agent: input.ownerAgent,
+  });
+
+export const startTask = (
+  taskId: string,
+  runId: string | null = null,
+  agentId: string | null = null,
+) =>
+  sendJson<MissionTask>("POST", `/v1/tasks/${encodeURIComponent(taskId)}/start`, {
+    run_id: runId,
+    agent_id: agentId,
+  });
+
+export const completeTask = (
+  taskId: string,
+  proof: string[],
+  runId: string | null = null,
+  artifacts: string | null = null,
+) =>
+  sendJson<MissionTask>("POST", `/v1/tasks/${encodeURIComponent(taskId)}/complete`, {
+    proof,
+    run_id: runId,
+    artifacts,
+  });
+
+export const failTask = (taskId: string, reason: string | null = null) =>
+  sendJson<MissionTask>("POST", `/v1/tasks/${encodeURIComponent(taskId)}/fail`, { reason });
+
+export const cancelTask = (taskId: string, reason: string | null = null) =>
+  sendJson<MissionTask>("POST", `/v1/tasks/${encodeURIComponent(taskId)}/cancel`, { reason });
+
+export const assignTask = (taskId: string, agentId: string) =>
+  sendJson<MissionTask>("POST", `/v1/tasks/${encodeURIComponent(taskId)}/assign`, {
+    agent_id: agentId,
+  });
+
+export const addTaskDependency = (taskId: string, dependsOn: string) =>
+  sendJson<MissionTask>("POST", `/v1/tasks/${encodeURIComponent(taskId)}/dependencies`, {
+    depends_on: dependsOn,
+  });
+
+export const removeTaskDependency = (taskId: string, dependencyId: string) =>
+  sendJson<MissionTask>(
+    "DELETE",
+    `/v1/tasks/${encodeURIComponent(taskId)}/dependencies/${encodeURIComponent(dependencyId)}`,
+  );

@@ -19,6 +19,21 @@ process, and a daemon restart after which Nova, the mission, the session history
 are still there. `scripts/e2e_m1.py` is that proof, run by hand because it needs the binary, a
 provider and real credit.
 
+**Work Graph — complete.** A Mission has a canonical work graph: tasks with dependencies, states,
+acceptance criteria and evidence, folded from `task.*` events, so a restart rebuilds the same graph
+and a replay reproduces it. The rules are pure functions in
+`packages/contracts/metaharness_contracts/taskgraph.py`, so the API, the projection, the UI and the
+replay cannot drift: a cycle is refused, "ready" means every dependency is satisfied, a task starts
+only when it is ready, a completion carries the evidence its gate requires, and a run belonging to
+one task cannot close another. The UI is a projection of it (Mission → Overview / Work Graph /
+Tasks) and holds no domain state of its own.
+
+Two contract notes: the states are the Book's `TaskState` vocabulary
+(`draft/ready/claimed/running/waiting/review/blocked/failed/done/cancelled`), so the brief's
+`planned` and `completed` map to `draft` and `done` -- renaming a shared enum is a contract change
+and was not done unilaterally; and `objective`/`assigned_agent_id` already existed as
+`description`/`owner_agent`, so no duplicate fields were added.
+
 **S1 — Execution Boundary — is complete and proven against the real runtime on Linux.** It is a
 security gate, not the Book's M3: **M3 in `PROJECT_BOOK.md` §77 is Multi-Runtime Team**, which stays
 ahead. This gate was reached first because the M2 run proved an agent could leave its workspace, and
@@ -58,8 +73,8 @@ nothing today bounds what a migrated agent may execute. The handoff rendering no
 acknowledgement instead of open work, which is the right ask for a transfer -- but a scratch
 directory is not a sandbox, and the script says so.
 
-**354 tests green locally** across 8 suites (v1 21, unit 34, contracts 113, store 57, integration
-63, replay 21, conformance 34, desktop 11) and the CI matrix is green on `ubuntu-latest` and
+**386 tests green locally** across 8 suites (v1 21, unit 48, contracts 113, store 57, integration
+81, replay 21, conformance 34, desktop 11) and the CI matrix is green on `ubuntu-latest` and
 `windows-latest`. `master` and the tag `v0.1-hermes-hosted` are untouched.
 
 | WP | State |
@@ -94,12 +109,18 @@ directory is not a sandbox, and the script says so.
 - **Scripts**: `python scripts/dev.py | test.py | doctor.py | package.py` — no Bash, no `shell=True`, works from PowerShell and POSIX.
 - **Canonical store** `apps/daemon/metaharness/store` (WP-004): SQLite WAL, three numbered migrations, `BEGIN IMMEDIATE` per append, `seq` assigned inside the transaction and gap-free, append-only enforced by triggers, idempotent by event id, content-addressed artifacts with no blob column, JSONL export that is derived only. One call proves replay: `uv run python -c "import asyncio, metaharness.store as s; print(asyncio.run(s.replay_equivalence_check()))"`.
 - **Boot reconciliation** `apps/daemon/metaharness/reconcile`: reads persisted state, asks a `ProcessProbe`, appends `run.interrupted` with `orphaned=true`, and never resumes work. Deliberately outside the store.
+- **Work graph**: `packages/contracts/metaharness_contracts/taskgraph.py` (the pure rules),
+  `apps/daemon/metaharness/projections/tasks.py` + migration `0007_tasks.sql` (the fold, with the
+  edges in their own table), `apps/daemon/metaharness/api/tasks.py` (the transitions and the
+  refusals), `apps/web/src/routes/mission.tsx` (Overview / Work Graph / Tasks as a projection).
+  Tests: `tests/unit/taskgraph/test_rules.py` and `tests/integration/api/test_tasks.py`, which
+  includes the four-task scenario and eight refusals.
 - **Execution boundary (S1)**: `packages/contracts/metaharness_contracts/policy.py` and
   `apps/daemon/metaharness/{budget.py,sandbox/}`; three providers (container → namespace → none) that
   say why they are unavailable, five canonical budgets with per-dimension enforcement levels, and
   `tests/integration/sandbox/test_execution_boundary.py` (9 tests, 1 skip where no strong provider
   exists). `scripts/e2e_m3.py` exits 0 with 31 checks against the real runtime.
-- **Tests**: v1 regression 21/21 · unit 34/34 · contracts 113/113 · store 57/57 · integration 63/63 (includes the 9 execution-boundary tests) · replay 21/21 · conformance 34/34 (2 skips, by design) · desktop 11/11 — **354 measured by `scripts/test.py`**, which is the only number to trust: earlier notes in this file quoted a total that was never counted, and this one was read off the runner's own output. The suites exercise a real server, real websockets, real process trees and real hard kills; the whole default run is ~2 min.
+- **Tests**: v1 regression 21/21 · unit 48/48 (includes the 14 work-graph rule tests) · contracts 113/113 · store 57/57 · integration 81/81 (9 execution-boundary + 18 work-graph) · replay 21/21 · conformance 34/34 (2 skips, by design) · desktop 11/11 — **386 measured by `scripts/test.py`**, which is the only number to trust: earlier notes in this file quoted a total that was never counted, and this one was read off the runner's own output. The suites exercise a real server, real websockets, real process trees and real hard kills; the whole default run is ~2 min.
 - **ProcessSupervisor** `apps/daemon/metaharness/process`: one interface, two OS implementations, pre-signal tree snapshot, verified kill (`orphan_check` inside the emitted event), bounded streams, wall-timeout budget. Design and the orphan bug it fixed: `docs/architecture/PROCESS_SUPERVISION.md`.
 - **Web shell** `apps/web` (WP-006): Vite + React + TS + TanStack Query + TanStack Router (code-based routes), one websocket owned by a context provider, connection state that distinguishes live from degraded from connecting, an event inspector that always says whether it is showing the live socket or the durable backlog, and a sidebar that marks unbuilt surfaces as `soon` instead of linking to nowhere. Built bundle is served by the daemon with an SPA fallback; deep links work and path traversal is refused (403, verified with `curl --path-as-is`). DOM verified in headless Chromium: the shell renders, the badge reads `live`, and the log's events appear.
 - **CI** `.github/workflows/ci.yml`: matrix `ubuntu-latest` + `windows-latest`, seven suites (v1, unit, contracts, store, integration, replay, conformance), plus a web job gated on `apps/web/package.json`.
@@ -108,7 +129,7 @@ directory is not a sandbox, and the script says so.
 
 No context engine, no plugin kernel, no secrets broker, no channels, no voice, no RAG, no auth
 token enforcement (the enforced property today is **loopback-only**), no approvals table, no tasks
-table, no worktree allocator.
+table, no worktree allocator, no approvals table.
 
 **Runtimes:** Pi (`pi --mode rpc`) and **Hermes (`hermes acp`)** are implemented adapters with
 conformance suites (ADR-0006, ADR-0016, `docs/protocols/`). OpenClaw and OMP are still adapters on
@@ -117,11 +138,10 @@ paper. The desktop shell exists: a window plus a Python host (ADR-0009,
 
 ## Next
 
-**Tasks / Work Graph** (the current one). A Mission stops being a grouping and gains a canonical
-work graph: tasks with dependencies, states, acceptance criteria and evidence, where a Run executes
-a Task and a Task is not a Session. The core lands in the daemon first (events, projection, API) and
-the UI is a projection of it. Order after that: **Approvals → Artifact Inspector → Worktree
-Allocator → Workboard → Canvas.**
+**Approvals** (the current one). The order the Architect set: **Approvals → Artifact Inspector →
+Worktree Allocator → Workboard → Canvas.** Tasks and their refusals exist; what does not exist yet
+is the gate that asks a human before an action at R3/R4 (BOOK §40/§44), and the artifact inspector
+that lets that human see what they are approving.
 
 **S2 — Selective Egress + Control Plane Auth** is registered as the next security gate, before
 Swarm/Factory, and deliberately not built yet: the S1 run showed an agent with an open network

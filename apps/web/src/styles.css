@@ -308,3 +308,49 @@ button:hover { border-color: var(--accent); }
 .badge-moderate { color: #e0c168; border-color: #7a6425; }
 .badge-weak { color: #e08b7a; border-color: #7a3f34; }
 .badge-unknown { color: var(--muted-foreground); }
+
+/* ---------------------------------------------------------------- work graph */
+
+.tabs { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.tabs button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); }
+
+fieldset.checks {
+  border: 1px solid var(--line);
+  padding: 0.5rem 0.75rem;
+  margin: 0.5rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+fieldset.checks legend {
+  color: var(--faint);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0 0.3rem;
+}
+
+label.check { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; }
+
+ul.plain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+}
+
+.wave { border-top: 1px solid var(--line); padding-top: 0.4rem; margin-top: 0.4rem; }
+.wave h3 {
+  margin: 0 0 0.3rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+  font-weight: 600;
+}
+
+.task-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+.task-actions input { min-width: 8rem; }

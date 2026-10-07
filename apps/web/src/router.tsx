@@ -19,6 +19,7 @@ import { AgentPage } from "./routes/agent";
 import { EventInspectorPage } from "./routes/events";
 import { MissionOverviewPage } from "./routes/index";
 import { MissionsPage } from "./routes/missions";
+import { MissionPage } from "./routes/mission";
 import { SystemPage } from "./routes/system";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
@@ -65,6 +66,17 @@ const missionsRoute = createRoute({
   component: MissionsPage,
 });
 
+const missionRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/missions/$missionId",
+  component: MissionDetailRoute,
+});
+
+function MissionDetailRoute() {
+  const { missionId } = missionRoute.useParams();
+  return <MissionPage missionId={missionId} />;
+}
+
 const agentsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/agents",
@@ -97,6 +109,7 @@ const systemRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute,
   missionsRoute,
+  missionRoute,
   agentsRoute,
   agentRoute,
   eventsRoute,
