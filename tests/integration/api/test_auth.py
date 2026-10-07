@@ -131,9 +131,9 @@ class AuthTest(unittest.TestCase):
     def test_c2_a_session_dies_with_the_daemon(self) -> None:
         """Per-launch credentials: a restart invalidates every session, with no revocation list."""
         self.assertEqual(self.client.get("/v1/events").status_code, 200)
-        self.client.__exit__(None, None, None)
-        self.client = TestClient(create_app(settings_for_test(self.data_root)))
-        self.client.__enter__()
+        # A plain client with a stale cookie is exactly what this test needs, and it goes through the
+        # helper so it is registered and closed like every other client.
+        self.client = unauth_client(self.data_root)
         self.client.cookies.set("mh_session", "the-old-one")
         self.assertEqual(self.client.get("/v1/events").status_code, 401)
 
