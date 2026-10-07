@@ -12,6 +12,7 @@ how an allowlist silently becomes an open proxy.
 from __future__ import annotations
 
 import asyncio
+import os
 import struct
 import sys
 import tempfile
@@ -181,7 +182,13 @@ class BrokerDecisionTest(unittest.TestCase):
         self.assertIsNotNone(self.broker.check_sni(decision, None), "no SNI means no binding")
 
 
+@unittest.skipUnless(
+    os.name == "posix",
+    "the egress transport is a unix socket: asyncio.start_unix_server does not exist on Windows, so "
+    "the broker's decision layer is verified there while its transport is honestly unsupported",
+)
 class BrokerTransportTest(unittest.TestCase):
+    """The transport is POSIX-only in this milestone, and says so rather than faking parity."""
     def test_a_refused_connect_answers_403_and_records_no_content(self) -> None:
         async def scenario() -> None:
             broker = EgressBroker(
