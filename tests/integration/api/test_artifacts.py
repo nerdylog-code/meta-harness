@@ -67,6 +67,7 @@ class ArtifactInspectorTest(unittest.TestCase):
         self.assertFalse(view["locator"].startswith("/"), "an absolute host path must not leave the daemon")
         self.assertNotIn(str(Path.home()), json.dumps(view))
         self.assertTrue(view["locator"].startswith("artifacts/"), view["locator"])
+        self.assertNotIn("\\", view["locator"], "the locator is POSIX-style on every platform")
 
     def test_a3_json_is_formatted_and_bounded(self) -> None:
         artifact = self.put(json.dumps({"b": [1, 2], "a": "x"}).encode(), mime="application/json")

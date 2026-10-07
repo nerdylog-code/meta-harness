@@ -69,10 +69,15 @@ def preview_kind(mime: str) -> str:
 
 
 def _locator(record, data_root: Path) -> str:
-    """A storage locator, never an absolute host path (BOOK: no host paths in the wire)."""
+    """A storage locator: relative, and POSIX-style on every platform.
+
+    The separator is part of the wire. `str(relative_to(...))` renders backslashes on Windows, so the
+    same artifact would have a different locator there than on Linux -- which the Windows CI job
+    caught, and which is exactly the kind of divergence that makes a cross-platform contract a lie.
+    """
     path = Path(record.path)
     try:
-        return str(path.relative_to(data_root))
+        return path.relative_to(data_root).as_posix()
     except ValueError:
         return path.name
 
