@@ -557,3 +557,126 @@ export const consumeApproval = (
   id: string,
   input: { action_type: string; action_payload: Record<string, unknown>; by?: string },
 ) => sendJson<ApprovalConsumeResult>("POST", `/v1/approvals/${encodeURIComponent(id)}/consume`, input);
+
+// ------------------------------------------------------------------ artifacts
+
+export type ArtifactIntegrity = "ok" | "missing" | "mismatch" | "unchecked";
+export type ArtifactPreviewKind = "text" | "json" | "image" | "binary";
+
+export interface ArtifactOrigin {
+  mission_id?: string | null;
+  task_id?: string | null;
+  run_id?: string | null;
+  agent_id?: string | null;
+}
+
+export interface ArtifactRecord {
+  id: string;
+  sha256: string;
+  size: number;
+  mime: string;
+  locator: string;
+  preview_kind: ArtifactPreviewKind;
+  preview_available: boolean;
+  preview_reason: string | null;
+  integrity: ArtifactIntegrity;
+  integrity_detail: string | null;
+  verified: boolean;
+  origin: ArtifactOrigin;
+  metadata: Record<string, unknown>;
+  provenance: Record<string, unknown>;
+  created_at?: number;
+  seq?: number;
+}
+
+export interface ArtifactListPayload {
+  artifacts: ArtifactRecord[];
+  count: number;
+}
+
+export interface ArtifactPreview {
+  id: string;
+  mime: string;
+  kind: ArtifactPreviewKind;
+  size: number;
+  start: number;
+  limit: number;
+  truncated: boolean;
+  text: string | null;
+  reason: string | null;
+  integrity?: ArtifactIntegrity;
+  content_url?: string;
+}
+
+export interface ArtifactListFilters {
+  mission_id?: string;
+  task_id?: string;
+  run_id?: string;
+  agent_id?: string;
+}
+
+async function getArtifactJson<T>(path: string): Promise<T> {
+  const response = await fetch(path, { headers: { accept: "application/json" } });
+  if (!response.ok) {
+    const text = await response.text();
+    let detail = text;
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && "detail" in parsed) {
+        const raw = (parsed as { detail: unknown }).detail;
+        if (typeof raw === "string") detail = raw;
+      }
+    } catch {
+      // Keep the daemon's plain-text refusal detail.
+    }
+    throw new ApiRefusal(path, response.status, detail.slice(0, 500));
+  }
+  return (await response.json()) as T;
+}
+
+export const fetchArtifacts = (filters: ArtifactListFilters = {}) => {
+  const query = new URLSearchParams();
+  for (const key of ["mission_id", "task_id", "run_id", "agent_id"] as const) {
+    const value = filters[key];
+    if (value) query.set(key, value);
+  }
+  const suffix = query.size ? `?${query.toString()}` : "";
+  return getArtifactJson<ArtifactListPayload>(`/v1/artifacts${suffix}`);
+};
+
+export const fetchArtifact = (artifactId: string) =>
+  getArtifactJson<ArtifactRecord>(`/v1/artifacts/${encodeURIComponent(artifactId)}`);
+
+export const fetchArtifactPreview = (artifactId: string, start = 0, limit = 4096) => {
+  const query = new URLSearchParams({ start: String(start), limit: String(limit) });
+  return getArtifactJson<ArtifactPreview>(
+    `/v1/artifacts/${encodeURIComponent(artifactId)}/preview?${query.toString()}`,
+  );
+};
+
+export async function fetchArtifactContent(
+  artifactId: string,
+  range: { start?: number; end?: number } = {},
+): Promise<Response> {
+  const query = new URLSearchParams();
+  if (range.start !== undefined) query.set("start", String(range.start));
+  if (range.end !== undefined) query.set("end", String(range.end));
+  const suffix = query.size ? `?${query.toString()}` : "";
+  const path = `/v1/artifacts/${encodeURIComponent(artifactId)}/content${suffix}`;
+  const response = await fetch(path);
+  if (!response.ok) {
+    const text = await response.text();
+    let detail = text;
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && "detail" in parsed) {
+        const raw = (parsed as { detail: unknown }).detail;
+        if (typeof raw === "string") detail = raw;
+      }
+    } catch {
+      // Keep the daemon's plain-text refusal detail.
+    }
+    throw new ApiRefusal(path, response.status, detail.slice(0, 500));
+  }
+  return response;
+}
