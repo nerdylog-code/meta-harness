@@ -15,6 +15,7 @@
  */
 
 import { useMemo, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ApiRefusal,
@@ -132,6 +133,16 @@ function computeWaves(tasks: MissionTask[]): { waves: MissionTask[][]; unplaced:
 
 function titleOf(tasks: MissionTask[], id: string): string {
   return tasks.find((task) => task.id === id)?.title ?? id;
+}
+
+function ArtifactReferences({ value, label }: { value: string; label: string }) {
+  let entries: unknown = value;
+  try { entries = JSON.parse(value) as unknown; } catch { /* retain the original plain text */ }
+  const values = Array.isArray(entries) ? entries : [entries];
+  return <div className="artifact-references">{label}: {values.map((entry, index) => {
+    const text = typeof entry === "string" ? entry : JSON.stringify(entry) ?? String(entry);
+    return <span key={`${index}-${text}`}>{index > 0 ? ", " : ""}{text.startsWith("art_") ? <Link to="/artifacts/$artifactId" params={{ artifactId: text }}>{text}</Link> : text}</span>;
+  })}</div>;
 }
 
 export function MissionPage({ missionId }: { missionId: string }) {
@@ -561,6 +572,8 @@ export function MissionPage({ missionId }: { missionId: string }) {
                         <td>
                           {task.title}
                           <div className="faint mono">{task.id}</div>
+                          {task.proof ? <ArtifactReferences value={task.proof} label="proof" /> : null}
+                          {task.artifacts ? <ArtifactReferences value={task.artifacts} label="artifacts" /> : null}
                         </td>
                         <td>
                           <span className={stateBadge(task)}>{task.state}</span>

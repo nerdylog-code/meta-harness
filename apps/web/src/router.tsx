@@ -21,6 +21,7 @@ import { MissionOverviewPage } from "./routes/index";
 import { MissionsPage } from "./routes/missions";
 import { MissionPage } from "./routes/mission";
 import { ApprovalsPage } from "./routes/approvals";
+import { ArtifactRoute } from "./routes/artifact";
 import { SystemPage } from "./routes/system";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
@@ -107,6 +108,12 @@ const approvalsRoute = createRoute({
   component: ApprovalsPage,
 });
 
+const artifactRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/artifacts/$artifactId",
+  component: ArtifactRoute,
+});
+
 const systemRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/system",
@@ -121,6 +128,7 @@ const routeTree = rootRoute.addChildren([
   agentRoute,
   eventsRoute,
   approvalsRoute,
+  artifactRoute,
   systemRoute,
 ]);
 

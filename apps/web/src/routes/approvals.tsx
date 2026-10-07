@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ApiRefusal,
@@ -39,6 +40,13 @@ function stateClass(state: Approval["state"]): string {
 }
 
 const EMPTY_APPROVALS: Approval[] = [];
+
+function artifactIds(value: unknown): string[] {
+  if (typeof value === "string") return value.startsWith("art_") ? [value] : [];
+  if (Array.isArray(value)) return value.flatMap(artifactIds);
+  if (value && typeof value === "object") return Object.values(value).flatMap(artifactIds);
+  return [];
+}
 
 export function ApprovalsPage() {
   const queryClient = useQueryClient();
@@ -159,6 +167,7 @@ export function ApprovalsPage() {
             <div className="approval-payload">
               <h3>Exact action payload</h3>
               <pre className="approval-json">{JSON.stringify(approval.action_payload, null, 2)}</pre>
+              {artifactIds(approval.action_payload).length > 0 ? <p className="tight">Artifacts: {[...new Set(artifactIds(approval.action_payload))].map((id) => <span key={id}><Link to="/artifacts/$artifactId" params={{ artifactId: id }}>{id}</Link>{" "}</span>)}</p> : null}
               <p className="tight">action_payload_hash</p>
               <code className="approval-hash mono">{approval.action_payload_hash}</code>
             </div>
