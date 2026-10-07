@@ -504,3 +504,56 @@ export const removeTaskDependency = (taskId: string, dependencyId: string) =>
     "DELETE",
     `/v1/tasks/${encodeURIComponent(taskId)}/dependencies/${encodeURIComponent(dependencyId)}`,
   );
+
+// ------------------------------------------------------------------- approvals
+
+export type ApprovalRisk = "R0" | "R1" | "R2" | "R3" | "R4";
+export type ApprovalState = "pending" | "granted" | "denied" | "expired" | "consumed";
+
+export interface Approval {
+  id: string;
+  action_type: string;
+  action_payload: Record<string, unknown>;
+  action_payload_hash: string;
+  risk_level: ApprovalRisk;
+  requires_human: boolean;
+  human_summary: string;
+  reversibility: "reversible" | "irreversible";
+  requested_by: string;
+  requested_ts: number;
+  expires_at: number | null;
+  state: ApprovalState;
+  granted_by: string | null;
+  granted_ts: number | null;
+  consumed_ts: number | null;
+  reason: string | null;
+  risk_floor: string;
+}
+
+export interface ApprovalList {
+  approvals: Approval[];
+  pending: string[];
+  counts: Record<string, number>;
+}
+
+export interface ApprovalConsumeResult {
+  authorised: boolean;
+  approval_id: string;
+  action_payload_hash: string;
+  approval: Approval;
+}
+
+export const fetchApprovals = () => getJson<ApprovalList>("/v1/approvals?state=pending");
+export const fetchApproval = (id: string) =>
+  getJson<Approval>(`/v1/approvals/${encodeURIComponent(id)}`);
+export const grantApproval = (id: string, by: string) =>
+  sendJson<Approval>("POST", `/v1/approvals/${encodeURIComponent(id)}/grant`, { by });
+export const denyApproval = (id: string, by: string, reason?: string) =>
+  sendJson<Approval>("POST", `/v1/approvals/${encodeURIComponent(id)}/deny`, {
+    by,
+    ...(reason ? { reason } : {}),
+  });
+export const consumeApproval = (
+  id: string,
+  input: { action_type: string; action_payload: Record<string, unknown>; by?: string },
+) => sendJson<ApprovalConsumeResult>("POST", `/v1/approvals/${encodeURIComponent(id)}/consume`, input);

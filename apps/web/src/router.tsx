@@ -20,6 +20,7 @@ import { EventInspectorPage } from "./routes/events";
 import { MissionOverviewPage } from "./routes/index";
 import { MissionsPage } from "./routes/missions";
 import { MissionPage } from "./routes/mission";
+import { ApprovalsPage } from "./routes/approvals";
 import { SystemPage } from "./routes/system";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
@@ -100,6 +101,12 @@ const eventsRoute = createRoute({
   component: EventInspectorPage,
 });
 
+const approvalsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/approvals",
+  component: ApprovalsPage,
+});
+
 const systemRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/system",
@@ -113,6 +120,7 @@ const routeTree = rootRoute.addChildren([
   agentsRoute,
   agentRoute,
   eventsRoute,
+  approvalsRoute,
   systemRoute,
 ]);
 

@@ -354,3 +354,69 @@ ul.plain {
 
 .task-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
 .task-actions input { min-width: 8rem; }
+
+/* --------------------------------------------------------------- approvals */
+.approval-payload, .approval-check {
+  margin-top: 0.8rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--line);
+}
+.approval-payload h3, .approval-check h3 {
+  margin: 0 0 0.45rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.approval-json {
+  max-height: 24rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+}
+.approval-hash {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--accent);
+  font-size: 0.75rem;
+}
+.approval-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.55rem;
+  margin-top: 0.8rem;
+}
+.approval-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: var(--faint);
+  font-size: 0.7rem;
+}
+.approval-controls input, .approval-check textarea {
+  min-width: min(18rem, 75vw);
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  padding: 0.4rem;
+  font: inherit;
+}
+.approval-check textarea {
+  display: block;
+  width: 100%;
+  min-height: 8rem;
+  margin: 0.5rem 0;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  white-space: pre;
+}
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button:focus-visible, input:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
