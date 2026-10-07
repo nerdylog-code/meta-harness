@@ -203,6 +203,32 @@ class WorkspaceTest(unittest.TestCase):
         swept = self.client.post("/v1/workspaces/leases/expire").json()
         self.assertEqual(swept["count"], 0, "the expired lease was already replaced, not swept twice")
 
+    def test_b3b_the_sweep_records_the_expiration_as_an_event(self) -> None:
+        """The Architect's §15 closing line: expire -> a canonical event -> the next writer gets in.
+
+        An expired lease is a fact in the log, not a silent absence: the sweep emits
+        `workspace.lease.expired`, and only then does the allocation read as free.
+        """
+        task = self.task("A")
+        self.allocate(task)
+        self.acquire(task, "run_1", ttl_s=0.001)
+        import time as _time
+
+        _time.sleep(0.05)
+        swept = self.client.post("/v1/workspaces/leases/expire").json()
+        self.assertEqual(swept["count"], 1, swept)
+        self.assertEqual(swept["expired"], [task])
+        events = self.client.get("/v1/events?limit=200").json()["events"]
+        expirations = [event for event in events if event["kind"] == "workspace.lease.expired"]
+        self.assertEqual(len(expirations), 1, "exactly one canonical expiration was recorded")
+        self.assertEqual(expirations[0]["payload"]["generation"], 1)
+        self.assertEqual(expirations[0]["payload"]["run_id"], "run_1")
+        self.assertEqual(self.inspect(task)["writer"]["state"], "expired")
+        # And the allocation is free again: the next writer takes generation 2.
+        next_writer = self.acquire(task, "run_2")
+        self.assertEqual(next_writer.status_code, 200, next_writer.text)
+        self.assertEqual(next_writer.json()["writer"]["generation"], 2)
+
     def test_b4_a_lease_whose_run_died_is_settled_at_boot(self) -> None:
         task = self.task("A")
         self.allocate(task)

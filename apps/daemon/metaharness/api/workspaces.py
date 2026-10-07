@@ -447,7 +447,12 @@ def expire_leases(request: Request) -> dict[str, Any]:
             _publish(
                 request,
                 "workspace.lease.expired",
-                {"run_id": row["run_id"], "generation": row["generation"], "reason": "ttl passed"},
+                {
+                    "repository_common": row["repository_common"],
+                    "run_id": row["run_id"],
+                    "generation": row["generation"],
+                    "reason": "ttl passed",
+                },
                 task_id=row["task_id"],
                 run_id=row["run_id"],
             )
