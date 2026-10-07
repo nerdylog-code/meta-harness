@@ -88,8 +88,13 @@ class ReconciliationTest(unittest.TestCase):
         payload = completed[0].payload_body
         self.assertEqual(payload["runs_examined"], report.runs_examined)
         self.assertEqual(payload["orphans_marked"], report.orphans_marked)
-        self.assertEqual(payload["leases_released"], 0)
-        self.assertIn("worktree", payload["leases_note"])
+        self.assertEqual(payload["leases_released"], 0, "no lease was held, so none was settled")
+        self.assertIsNone(
+            payload["leases_note"],
+            "the placeholder note is retired: the lease surface exists, and the count is measured "
+            "rather than assumed",
+        )
+        self.assertIsInstance(payload["leases_released"], int)
 
     def test_a9_running_it_twice_marks_nothing_the_second_time(self) -> None:
         self._seed()

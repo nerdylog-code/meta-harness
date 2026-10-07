@@ -32,6 +32,7 @@ from .domain import (
 )
 from .runs import RunsProjection
 from .tasks import TasksProjection
+from .workspaces import WorkspacesProjection
 
 __all__ = [
     "DEFAULT_PROJECTIONS",
@@ -45,6 +46,7 @@ __all__ = [
     "RunsProjection",
     "SessionsProjection",
     "TasksProjection",
+    "WorkspacesProjection",
     "apply_event",
     "digest",
     "snapshot",
@@ -79,6 +81,7 @@ DEFAULT_PROJECTIONS: tuple[Projection, ...] = (
     MigrationsProjection(),
     TasksProjection(),
     ApprovalsProjection(),
+    WorkspacesProjection(),
 )
 
 

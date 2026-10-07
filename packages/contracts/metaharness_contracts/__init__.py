@@ -118,11 +118,20 @@ from .serialization import NotJsonSafe, dumps, external_envelope, json_safe, rou
 from .usage import Metric, UsageSample
 from .workspace import (
     DEFAULT_ISOLATING_POLICY,
+    LEASE_TTL_S,
     NETWORK_MODES,
+    LeaseState,
     NetworkPolicy,
+    RepositoryIdentity,
     SecretPolicy,
+    WorkspaceAllocation,
     WorkspacePolicy,
+    WorkspaceState,
+    WriterLease,
+    acquire_verdict,
     enforcement_is_honest,
+    enforcement_summary,
+    release_verdict,
 )
 
 #: Every contract that crosses the wire, in the order the generator emits them.

@@ -38,7 +38,13 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
 
 from . import paths
-from .api import agents_router, approvals_router, artifacts_router, tasks_router
+from .api import (
+    agents_router,
+    approvals_router,
+    artifacts_router,
+    tasks_router,
+    workspaces_router,
+)
 from .events import EventBus
 from .reconcile import BootReconciler, PidProbe
 from .sandbox import ExecutionEnvironment
@@ -340,6 +346,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(tasks_router)
     app.include_router(approvals_router)
     app.include_router(artifacts_router)
+    app.include_router(workspaces_router)
 
     web_root = settings.resolved_web_root()
     if web_root is not None:
