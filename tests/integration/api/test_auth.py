@@ -33,6 +33,7 @@ from tests.support import (  # noqa: E402
     TEST_ORIGIN,
     authed_client,
     bootstrap_url,
+    close_clients,
     settings_for_test,
     unauth_client,
 )
@@ -48,7 +49,7 @@ class AuthTest(unittest.TestCase):
         self.client = authed_client(self.data_root)
 
     def tearDown(self) -> None:
-        self.client.__exit__(None, None, None)
+        close_clients()
         self._tmp.cleanup()
 
     # ------------------------------------------------------------------ the public surface

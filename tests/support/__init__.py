@@ -77,6 +77,21 @@ def bootstrap_url(data_dir: str | Path) -> str:
     return absolute[marker:]
 
 
+#: Every client handed out, so a test can close them all: on Windows an open SQLite handle stops the
+#: temporary directory from being removed, and a leaked client is a leaked file lock.
+_OPEN: list[TestClient] = []
+
+
+def close_clients() -> None:
+    """Close every client this helper opened. Call it from tearDown."""
+    while _OPEN:
+        client = _OPEN.pop()
+        try:
+            client.__exit__(None, None, None)
+        except Exception:  # noqa: BLE001 - a client already closed is not a failure
+            pass
+
+
 def authed_client(data_dir: str | Path, **settings_overrides: Any) -> AuthedClient:
     """A client that went through the real bootstrap and holds a real session."""
     settings = settings_for_test(data_dir, **settings_overrides)
@@ -87,6 +102,7 @@ def authed_client(data_dir: str | Path, **settings_overrides: Any) -> AuthedClie
         client.__exit__(None, None, None)
         raise AssertionError(f"bootstrap failed: {response.status_code} {response.text}")
     client.csrf = client.get("/v1/session").json()["csrf"]
+    _OPEN.append(client)
     return client
 
 
@@ -95,11 +111,13 @@ def unauth_client(data_dir: str | Path, **settings_overrides: Any) -> TestClient
     settings = settings_for_test(data_dir, **settings_overrides)
     client = TestClient(create_app(settings))
     client.__enter__()
+    _OPEN.append(client)
     return client
 
 
 __all__ = [
     "AuthedClient",
+    "close_clients",
     "CSRF_HEADER",
     "TEST_HOST",
     "TEST_ORIGIN",

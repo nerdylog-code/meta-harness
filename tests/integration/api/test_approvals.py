@@ -19,7 +19,13 @@ for extra in (REPO_ROOT / "apps" / "daemon", REPO_ROOT / "packages" / "contracts
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 
-from tests.support import CSRF_HEADER, TEST_ORIGIN, authed_client, unauth_client  # noqa: E402
+from tests.support import (  # noqa: E402
+    CSRF_HEADER,
+    TEST_ORIGIN,
+    authed_client,
+    close_clients,
+    unauth_client,
+)
 
 PAYLOAD = {"branch": "v2/control-plane", "task": "tsk_one"}
 
@@ -30,7 +36,7 @@ class ApprovalTest(unittest.TestCase):
         self.client = authed_client(self._tmp.name)
 
     def tearDown(self) -> None:
-        self.client.__exit__(None, None, None)
+        close_clients()
         self._tmp.cleanup()
 
     # ------------------------------------------------------------------ helpers
