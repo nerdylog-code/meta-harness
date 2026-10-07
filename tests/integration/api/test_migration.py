@@ -28,6 +28,7 @@ if str(REPO_ROOT / "apps" / "daemon") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "apps" / "daemon"))
 
 from tests.support import authed_client  # noqa: E402
+from tests.support import close_clients  # noqa: E402
 from metaharness.capsule import build_capsule, verify_capsule  # noqa: E402
 from metaharness_contracts.capsule import ArtifactRefLite, ContextCapsule  # noqa: E402
 
@@ -43,7 +44,7 @@ class MigrationTest(unittest.TestCase):
         self.app = self.client.app
 
     def tearDown(self) -> None:
-        self.client.__exit__(None, None, None)
+        close_clients()
         self._tmp.cleanup()
 
     # ------------------------------------------------------------------ helpers

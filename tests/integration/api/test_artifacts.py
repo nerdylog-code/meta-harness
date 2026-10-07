@@ -21,6 +21,7 @@ for extra in (REPO_ROOT / "apps" / "daemon", REPO_ROOT / "packages" / "contracts
         sys.path.insert(0, str(extra))
 
 from tests.support import authed_client  # noqa: E402
+from tests.support import close_clients  # noqa: E402
 
 
 class ArtifactInspectorTest(unittest.TestCase):
@@ -31,7 +32,7 @@ class ArtifactInspectorTest(unittest.TestCase):
         self.store = self.app.state.store
 
     def tearDown(self) -> None:
-        self.client.__exit__(None, None, None)
+        close_clients()
         self._tmp.cleanup()
 
     # ------------------------------------------------------------------ helpers

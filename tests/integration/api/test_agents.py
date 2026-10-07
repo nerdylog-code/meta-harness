@@ -21,6 +21,7 @@ if str(REPO_ROOT / "apps" / "daemon") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "apps" / "daemon"))
 
 from tests.support import authed_client  # noqa: E402
+from tests.support import close_clients  # noqa: E402
 from metaharness.store.migrations import discover  # noqa: E402
 from metaharness_contracts import IdKind, new_id  # noqa: E402
 
@@ -36,7 +37,7 @@ class ApiTestCase(unittest.TestCase):
         self.app = self.client.app
 
     def tearDown(self) -> None:
-        self.client.__exit__(None, None, None)
+        close_clients()
         self._tmp.cleanup()
 
     def create_mission(self, title: str = "Harness V2") -> str:

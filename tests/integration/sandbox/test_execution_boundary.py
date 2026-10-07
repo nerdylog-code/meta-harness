@@ -29,6 +29,7 @@ from metaharness.app import Settings, create_app  # noqa: E402
 from metaharness.sandbox import ExecutionEnvironment, describe_providers  # noqa: E402
 from metaharness_contracts import Enforcement, RequestedPolicy  # noqa: E402
 from tests.support import AuthedClient, authed_client  # noqa: E402
+from tests.support import close_clients  # noqa: E402
 
 FAKE_ACP = REPO_ROOT / "tests" / "fixtures" / "hermes_fake_acp.py"
 #: The system interpreter, so the sandbox needs no project paths bound to run the peer.
@@ -140,7 +141,7 @@ class BudgetTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         if self.client is not None:
-            self.client.__exit__(None, None, None)
+            close_clients()
         shutil.rmtree(self.workspace, ignore_errors=True)
         self._tmp.cleanup()
 

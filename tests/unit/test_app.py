@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from metaharness.app import Settings  # noqa: E402
 from metaharness.version import VERSION  # noqa: E402
 from tests.support import authed_client, unauth_client  # noqa: E402
+from tests.support import close_clients  # noqa: E402
 
 
 class DaemonTestCase(unittest.TestCase):
@@ -27,7 +28,7 @@ class DaemonTestCase(unittest.TestCase):
         self.client = authed_client(self._tmp.name)
 
     def tearDown(self) -> None:
-        self.client.__exit__(None, None, None)
+        close_clients()
         self._tmp.cleanup()
 
 
