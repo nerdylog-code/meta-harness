@@ -28,20 +28,24 @@ import { SystemPage } from "./routes/system";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { EventStreamProvider } from "./stream";
+import { SessionNotice, SessionProvider } from "./session";
 
 function RootLayout() {
   return (
-    <EventStreamProvider>
-      <div className="app">
-        <Sidebar />
-        <div className="workspace">
-          <TopBar />
-          <main className="surface">
-            <Outlet />
-          </main>
+    <SessionProvider>
+      <EventStreamProvider>
+        <div className="app">
+          <Sidebar />
+          <div className="workspace">
+            <TopBar />
+            <SessionNotice />
+            <main className="surface">
+              <Outlet />
+            </main>
+          </div>
         </div>
-      </div>
-    </EventStreamProvider>
+      </EventStreamProvider>
+    </SessionProvider>
   );
 }
 

@@ -20,13 +20,13 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 for extra in (REPO_ROOT / "apps" / "daemon", REPO_ROOT / "packages" / "contracts"):
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-from metaharness.app import Settings, create_app  # noqa: E402
+from tests.support import authed_client  # noqa: E402
 
 
 class BoardTest(unittest.TestCase):
@@ -34,10 +34,7 @@ class BoardTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory(prefix="board-")
         self.data_root = Path(self._tmp.name) / "data root"
         self.data_root.mkdir(parents=True)
-        self.client = TestClient(
-            create_app(Settings(port=0, data_dir=str(self.data_root), serve_web=False))
-        )
-        self.client.__enter__()
+        self.client = authed_client(self.data_root)
         self.store = self.client.app.state.store  # type: ignore[attr-defined]
         self.mission = self.client.post(
             "/v1/missions", json={"title": "Diamond", "objective": "board"}
@@ -202,10 +199,7 @@ class BoardTest(unittest.TestCase):
         # Restart: the board is composed from the log, so it must read the same.
         before = self.lanes()
         self.client.__exit__(None, None, None)
-        self.client = TestClient(
-            create_app(Settings(port=0, data_dir=str(self.data_root), serve_web=False))
-        )
-        self.client.__enter__()
+        self.client = authed_client(self.data_root)
         self.store = self.client.app.state.store  # type: ignore[attr-defined]
         self.assertEqual(self.lanes(), before, "the board after a restart is the same board")
 

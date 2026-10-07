@@ -14,20 +14,19 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 for extra in (REPO_ROOT / "apps" / "daemon", REPO_ROOT / "packages" / "contracts"):
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-from metaharness.app import Settings, create_app  # noqa: E402
+from tests.support import authed_client  # noqa: E402
 
 
 class ArtifactInspectorTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="art-api-")
-        self.client = TestClient(create_app(Settings(port=0, data_dir=self._tmp.name, serve_web=False)))
-        self.client.__enter__()
+        self.client = authed_client(self._tmp.name)
         self.app = self.client.app  # type: ignore[attr-defined,union-attr]
         self.store = self.app.state.store
 
@@ -174,8 +173,7 @@ class ArtifactInspectorTest(unittest.TestCase):
         artifact = self.put(b"kept", mime="text/plain", metadata={"kind": "log"}, origin={"producer": "nova"})
         before = self.view(artifact)
         self.client.__exit__(None, None, None)
-        self.client = TestClient(create_app(Settings(port=0, data_dir=self._tmp.name, serve_web=False)))
-        self.client.__enter__()
+        self.client = authed_client(self._tmp.name)
         after = self.view(artifact)
         self.assertEqual(after["sha256"], before["sha256"])
         self.assertEqual(after["metadata"], before["metadata"])

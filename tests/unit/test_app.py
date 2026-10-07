@@ -8,21 +8,23 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 if str(REPO_ROOT / "apps" / "daemon") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "apps" / "daemon"))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from metaharness.app import Settings, create_app  # noqa: E402
+from metaharness.app import Settings  # noqa: E402
 from metaharness.version import VERSION  # noqa: E402
+from tests.support import authed_client, unauth_client  # noqa: E402
 
 
 class DaemonTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.settings = Settings(port=0, data_dir=self._tmp.name, serve_web=False)
-        self.client = TestClient(create_app(self.settings))
-        self.client.__enter__()  # run lifespan: layout + system.daemon.started
+        self.client = authed_client(self._tmp.name)
 
     def tearDown(self) -> None:
         self.client.__exit__(None, None, None)
@@ -31,7 +33,7 @@ class DaemonTestCase(unittest.TestCase):
 
 class TestHealth(DaemonTestCase):
     def test_health_ok_and_reports_identity(self) -> None:
-        response = self.client.get("/health")
+        response = self.client.get("/v1/system/health")
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["status"], "ok")
@@ -52,10 +54,11 @@ class TestVersion(DaemonTestCase):
         response = self.client.get("/version")
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["name"], "meta-harness")
+        self.assertEqual(body["service"], "meta-harness")
         self.assertEqual(body["version"], VERSION)
         self.assertEqual(body["api_version"], "v1")
-        self.assertTrue(body["git_sha"], "git_sha must be present (or 'unknown')")
+        detail = self.client.get("/v1/system/health").json()
+        self.assertTrue(detail["git_sha"], "git_sha must be present (or 'unknown')")
         self.assertTrue(body["python"])
         self.assertTrue(body["platform"])
 
@@ -81,10 +84,11 @@ class TestEventRead(DaemonTestCase):
 
 class TestLoopbackGuard(DaemonTestCase):
     def test_loopback_client_is_allowed(self) -> None:
-        self.assertEqual(self.client.get("/health").status_code, 200)
+        self.assertEqual(self.client.get("/v1/system/health").status_code, 200)
 
     def test_non_loopback_client_is_refused(self) -> None:
-        foreign = TestClient(create_app(self.settings), client=("10.1.2.3", 44444))
+        foreign = unauth_client(self._tmp.name)
+        foreign._transport.client = ("10.1.2.3", 44444)
         with foreign:
             response = foreign.get("/health")
         self.assertEqual(response.status_code, 403)
@@ -96,7 +100,7 @@ class TestWebBundleAbsent(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             settings = Settings(port=0, data_dir=tmp, serve_web=False)
             self.assertIsNone(settings.resolved_web_root())
-            with TestClient(create_app(settings)) as client:
+            with authed_client(tmp) as client:
                 self.assertEqual(client.get("/health").status_code, 200)
 
 
@@ -111,7 +115,7 @@ class TestStoreLifecycle(unittest.TestCase):
     def test_shutdown_releases_the_database_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             settings = Settings(port=0, data_dir=tmp, serve_web=False)
-            with TestClient(create_app(settings)) as client:
+            with authed_client(tmp) as client:
                 self.assertEqual(client.get("/health").status_code, 200)
                 db = Path(tmp) / "data" / "metaharness.sqlite3"
                 self.assertTrue(db.is_file(), "the daemon must create its store in the data root")
@@ -126,8 +130,8 @@ class TestStoreLifecycle(unittest.TestCase):
     def test_health_reports_the_canonical_store(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             settings = Settings(port=0, data_dir=tmp, serve_web=False)
-            with TestClient(create_app(settings)) as client:
-                store = client.get("/health").json()["store"]
+            with authed_client(tmp) as client:
+                store = client.get("/v1/system/health").json()["store"]
             self.assertGreaterEqual(store["schema_version"], 3)
             self.assertEqual(store["journal_mode"], "wal")
             self.assertGreater(store["events"], 0)

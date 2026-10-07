@@ -10,10 +10,13 @@ the window closes -- is here, where the supervisor and the test suite already li
 
 Protocol: one JSON object per line on stdout, never anything else.
 
-    {"status": "attached", ...}   a MetaHarness daemon was already listening; nothing was spawned
-    {"status": "started",  ...}   this process spawned the daemon and it answered /health
-    {"status": "failed",   ...}   the daemon did not come up; carries the reason and the log path
-    {"status": "stopped",  ...}   the child tree was killed; orphan_check says whether it was clean
+    {"status": "attached", ...}       probe-only confirmation that a daemon is listening
+    {"status": "attach_refused", ...} normal launch refused an unsafe authenticated attach
+    {"status": "started", ...}         this process spawned the daemon and checked for fresh bootstrap
+    {"status": "failed", ...}          the daemon did not come up; carries the reason and log path
+    {"status": "stopped", ...}         the child tree was killed; orphan_check says whether clean
+    {"status": "free", ...}            probe-only confirmation that the port is free
+    {"status": "child_env", ...}       diagnostic output of the child environment
 
 stdin is the shell's handle on this process: EOF means "the window closed", and that is the
 signal to kill the tree. The daemon's own output is captured by the supervisor (``drain=True``),
@@ -29,6 +32,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import signal
 import socket
 import sys
@@ -50,6 +54,22 @@ DEFAULT_PORT = 8765
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_TIMEOUT_S = 30.0
 PROBE_TIMEOUT_S = 0.8
+BOOTSTRAP_URL_RE = re.compile(r"(https?://[^\s\"']*/auth/bootstrap\?capability=)[^&\s\"']+", re.IGNORECASE)
+_BOOTSTRAP_CAPABILITY: str | None = None
+
+
+def redact(value: Any) -> Any:
+    """Recursively redact bootstrap capabilities before anything reaches stdout or disk."""
+    if isinstance(value, str):
+        clean = BOOTSTRAP_URL_RE.sub(r"\1REDACTED", value)
+        if _BOOTSTRAP_CAPABILITY:
+            clean = clean.replace(_BOOTSTRAP_CAPABILITY, "REDACTED")
+        return clean
+    if isinstance(value, dict):
+        return {key: redact(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact(item) for item in value]
+    return value
 
 
 def default_log_path() -> Path:
@@ -61,21 +81,50 @@ def default_log_path() -> Path:
 
 
 def emit(payload: dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    sys.stdout.write(json.dumps(redact(payload), ensure_ascii=False) + "\n")
     sys.stdout.flush()
 
 
 def health(port: int, host: str = DEFAULT_HOST, timeout: float = PROBE_TIMEOUT_S) -> dict[str, Any] | None:
-    """The daemon's own answer, or None. Shape-checked, so a random server on the port is not
-    mistaken for our daemon (A2 depends on this distinction being real)."""
+    """Return the minimal, identity-checked public health response, or None."""
     try:
         with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=timeout) as response:
             data = json.loads(response.read())
     except (urllib.error.URLError, OSError, ValueError, TimeoutError):
         return None
-    if isinstance(data, dict) and "status" in data and "store" in data:
+    if (
+        isinstance(data, dict)
+        and data.get("status") == "ok"
+        and data.get("service") == "meta-harness"
+        and isinstance(data.get("version"), str)
+        and bool(data["version"])
+        and data.get("auth_required") is True
+    ):
         return data
     return None
+
+
+def bootstrap_file(args: argparse.Namespace) -> Path:
+    """Resolve the daemon's private bootstrap file without reading any credential elsewhere."""
+    from metaharness.paths import data_root
+
+    root = data_root(args.data_dir).resolve()
+    return root / "bootstrap.url"
+
+
+def read_bootstrap_url(path: Path, host: str, port: int) -> str | None:
+    """Read a fresh bootstrap URL once; never include its secret in host output or logs."""
+    global _BOOTSTRAP_CAPABILITY
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    expected_prefix = f"http://{host}:{port}/auth/bootstrap?capability="
+    capability = value[len(expected_prefix):] if value.startswith(expected_prefix) else ""
+    if not capability or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for char in capability):
+        return None
+    _BOOTSTRAP_CAPABILITY = capability
+    return value
 
 
 def port_is_occupied(port: int, host: str = DEFAULT_HOST) -> bool:
@@ -94,7 +143,7 @@ def pick_free_port(host: str = DEFAULT_HOST) -> int:
 def emit_status(log: Any, payload: dict[str, Any]) -> None:
     """The shell reads stdout; the log keeps the same record so a human (or a smoke test) can
     reconstruct what happened without the pipe."""
-    line = json.dumps(payload, ensure_ascii=False)
+    line = json.dumps(redact(payload), ensure_ascii=False)
     sys.stdout.write(line + "\n")
     sys.stdout.flush()
     try:
@@ -169,22 +218,22 @@ async def run(args: argparse.Namespace) -> int:
     log = log_path.open("a", encoding="utf-8")
 
     if existing:
-        # A2: a daemon is already there. Report it and attach -- never spawn a second one on a
-        # port that is already serving, and never hang waiting for a port we will not get.
-        payload = {
-            "status": "attached",
+        # A running daemon's one-use bootstrap belongs to its launcher; this host cannot
+        # safely pair with it, even if its public liveness endpoint is healthy.
+        reason = (
+            "A MetaHarness daemon is already running and requires authentication. "
+            "This host will not attach without a safe pairing mechanism; stop that daemon "
+            "and relaunch Meta-Harness from this window."
+        )
+        emit_status(log, {
+            "status": "attach_refused",
             "port": args.port,
             "port_source": "configured",
-            "url": f"http://{args.host}:{args.port}",
-            "detail": "a MetaHarness daemon is already listening; this window attached to it",
-            "schema_version": (existing.get("store") or {}).get("schema_version"),
-        }
-        log.write(f"attached to an existing daemon on {args.port}\n")
-        emit_status(log, payload)
-        await wait_for_exit()
-        emit_status(log, {"status": "stopped", "spawned": False, "orphan_check": True, "survivors": []})
+            "reason": reason,
+            "log": str(log_path),
+        })
         log.close()
-        return 0
+        return 1
 
     # WP-007 constraint 5: something else on the configured port must not be a dead end. If the
     # listener is not our daemon, start on a fresh port and say so -- clearly, in the status line
@@ -217,6 +266,7 @@ async def run(args: argparse.Namespace) -> int:
             except Exception:  # pragma: no cover - stream already gone
                 captured = ""
             if captured:
+                captured = redact(captured)
                 log.write(f"--- daemon {which} ---\n{captured}\n")
                 parts.append(captured)
         return "\n".join(parts)
@@ -267,7 +317,12 @@ async def run(args: argparse.Namespace) -> int:
         )
         return 1
 
-    log.write("healthy\n")
+    bootstrap_path = bootstrap_file(args)
+    bootstrap_url = read_bootstrap_url(bootstrap_path, args.host, args.port)
+    if bootstrap_url is None:
+        log.write("bootstrap unavailable: daemon has no fresh bootstrap file\n")
+    else:
+        log.write("fresh bootstrap available for the desktop WebView (capability redacted)\n")
     log.flush()
     emit_status(
         log,
@@ -276,9 +331,10 @@ async def run(args: argparse.Namespace) -> int:
             "port": args.port,
             "port_source": port_source,
             "url": f"http://{args.host}:{args.port}",
+            "bootstrap_file": str(bootstrap_path) if bootstrap_url is not None else None,
+            "bootstrap_available": bootstrap_url is not None,
             "pid": handle.pid,
             "log": str(log_path),
-            "schema_version": (healthy.get("store") or {}).get("schema_version"),
         },
     )
 

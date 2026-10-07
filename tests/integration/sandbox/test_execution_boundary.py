@@ -20,14 +20,15 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 if str(REPO_ROOT / "apps" / "daemon") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "apps" / "daemon"))
-
-from fastapi.testclient import TestClient  # noqa: E402
 
 from metaharness.app import Settings, create_app  # noqa: E402
 from metaharness.sandbox import ExecutionEnvironment, describe_providers  # noqa: E402
 from metaharness_contracts import Enforcement, RequestedPolicy  # noqa: E402
+from tests.support import AuthedClient, authed_client  # noqa: E402
 
 FAKE_ACP = REPO_ROOT / "tests" / "fixtures" / "hermes_fake_acp.py"
 #: The system interpreter, so the sandbox needs no project paths bound to run the peer.
@@ -143,18 +144,14 @@ class BudgetTest(unittest.TestCase):
         shutil.rmtree(self.workspace, ignore_errors=True)
         self._tmp.cleanup()
 
-    def app_with(self, *, hang: bool = False, emit_tools: bool = True) -> TestClient:
+    def app_with(self, *, hang: bool = False, emit_tools: bool = True) -> AuthedClient:
         argv = [SYSTEM_PYTHON, str(self.workspace / "fake_acp.py")]
         if hang:
             argv.append("--hang")
         if not emit_tools:
             argv.append("--no-tools")
-        app = create_app(
-            Settings(port=0, data_dir=str(self.root), serve_web=False, hermes_argv=argv, sandbox="auto")
-        )
-        self.client = TestClient(app)
-        self.client.__enter__()
-        self.app = app
+        self.client = authed_client(self.root, hermes_argv=argv, sandbox="auto")
+        self.app = self.client.app
         return self.client
 
     def make_agent(self) -> str:

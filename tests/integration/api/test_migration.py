@@ -22,12 +22,12 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 if str(REPO_ROOT / "apps" / "daemon") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "apps" / "daemon"))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-from metaharness.app import Settings, create_app  # noqa: E402
+from tests.support import authed_client  # noqa: E402
 from metaharness.capsule import build_capsule, verify_capsule  # noqa: E402
 from metaharness_contracts.capsule import ArtifactRefLite, ContextCapsule  # noqa: E402
 
@@ -35,23 +35,12 @@ PI_FAKE = REPO_ROOT / "tests" / "fixtures" / "pi_fake_rpc.py"
 HERMES_FAKE = REPO_ROOT / "tests" / "fixtures" / "hermes_fake_acp.py"
 
 
-def settings_for(data_dir: str) -> Settings:
-    return Settings(
-        port=0,
-        data_dir=data_dir,
-        serve_web=False,
-        pi_argv=[sys.executable, str(PI_FAKE), "--emit-tools"],
-        hermes_argv=[sys.executable, str(HERMES_FAKE)],
-    )
-
-
 class MigrationTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="mh-migrate-")
         self.root = self._tmp.name
-        self.app = create_app(settings_for(self.root))
-        self.client = TestClient(self.app)
-        self.client.__enter__()
+        self.client = authed_client(self.root, pi_argv=[sys.executable, str(PI_FAKE), "--emit-tools"], hermes_argv=[sys.executable, str(HERMES_FAKE)])
+        self.app = self.client.app
 
     def tearDown(self) -> None:
         self.client.__exit__(None, None, None)
@@ -270,16 +259,7 @@ class MigrationTest(unittest.TestCase):
     def test_m2_an_unavailable_destination_does_not_take_the_source_with_it(self) -> None:
         """The requirement in one test: the old session must still be there."""
         work = self.do_work_on_pi()
-        broken = create_app(
-            Settings(
-                port=0,
-                data_dir=self.root,
-                serve_web=False,
-                pi_argv=[sys.executable, str(PI_FAKE), "--emit-tools"],
-                hermes_argv=["/nonexistent/hermes-binary"],
-            )
-        )
-        with TestClient(broken) as client:
+        with authed_client(self.root, pi_argv=[sys.executable, str(PI_FAKE), "--emit-tools"], hermes_argv=["/nonexistent/hermes-binary"]) as client:
             response = client.post(
                 f"/v1/agents/{work['agent_id']}/migrate",
                 json={"to_runtime": "rt_hermes", "tools": ["read"], "mission_id": work["mission_id"]},
@@ -297,16 +277,7 @@ class MigrationTest(unittest.TestCase):
 
     def test_m2_a_destination_that_refuses_a_session_leaves_the_source_alone(self) -> None:
         work = self.do_work_on_pi()
-        refusing = create_app(
-            Settings(
-                port=0,
-                data_dir=self.root,
-                serve_web=False,
-                pi_argv=[sys.executable, str(PI_FAKE), "--emit-tools"],
-                hermes_argv=[sys.executable, str(HERMES_FAKE), "--fail-session-new"],
-            )
-        )
-        with TestClient(refusing) as client:
+        with authed_client(self.root, pi_argv=[sys.executable, str(PI_FAKE), "--emit-tools"], hermes_argv=[sys.executable, str(HERMES_FAKE), "--fail-session-new"]) as client:
             response = client.post(
                 f"/v1/agents/{work['agent_id']}/migrate",
                 json={"to_runtime": "rt_hermes", "tools": ["read"], "mission_id": work["mission_id"]},
@@ -324,16 +295,7 @@ class MigrationTest(unittest.TestCase):
         """After a failure, the attempt is a recorded fact with its furthest stage, and a retry is
         what recovers -- nothing is rewritten."""
         work = self.do_work_on_pi()
-        refusing = create_app(
-            Settings(
-                port=0,
-                data_dir=self.root,
-                serve_web=False,
-                pi_argv=[sys.executable, str(PI_FAKE), "--emit-tools"],
-                hermes_argv=[sys.executable, str(HERMES_FAKE), "--fail-session-new"],
-            )
-        )
-        with TestClient(refusing) as client:
+        with authed_client(self.root, pi_argv=[sys.executable, str(PI_FAKE), "--emit-tools"], hermes_argv=[sys.executable, str(HERMES_FAKE), "--fail-session-new"]) as client:
             client.post(f"/v1/agents/{work['agent_id']}/migrate", json={"to_runtime": "rt_hermes"})
             failures = client.get(f"/v1/migrations?agent_id={work['agent_id']}").json()
             self.assertEqual(failures["count"], 1)
@@ -364,8 +326,8 @@ class MigrationTest(unittest.TestCase):
         self.wait_for(migrated["to_session"], "runtime.hermes.settled")
         self.client.__exit__(None, None, None)
 
-        second_app = create_app(settings_for(self.root))
-        second = TestClient(second_app)
+        second = authed_client(self.root, pi_argv=[sys.executable, str(PI_FAKE), "--emit-tools"], hermes_argv=[sys.executable, str(HERMES_FAKE)])
+        second_app = second.app
         with second:
             agents = second.get("/v1/agents").json()
             self.assertEqual(agents["count"], 1)
@@ -382,8 +344,8 @@ class MigrationTest(unittest.TestCase):
             self.assertTrue(capsules["capsules"][0]["verified"])
             self.assertTrue(second_app.state.store.verify().ok)
 
-        self.client = TestClient(self.app)
-        self.client.__enter__()
+        self.client = authed_client(self.root, pi_argv=[sys.executable, str(PI_FAKE), "--emit-tools"], hermes_argv=[sys.executable, str(HERMES_FAKE)])
+        self.app = self.client.app
 
 
 if __name__ == "__main__":

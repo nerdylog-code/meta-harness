@@ -71,7 +71,14 @@ class FakeDaemon:
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:  # noqa: N802 - stdlib naming
                 if self.path == "/health":
-                    body = json.dumps({"status": "ok", "store": {"schema_version": 4}}).encode()
+                    # The public health surface is minimal after S2: identity and auth_required only.
+                    # A fixture still serving the old shape would not be recognised as our daemon.
+                    body = json.dumps({
+                        "status": "ok",
+                        "service": "meta-harness",
+                        "version": "0.2.0.dev0",
+                        "auth_required": True,
+                    }).encode()
                     self.send_response(200)
                     self.send_header("content-type", "application/json")
                     self.send_header("content-length", str(len(body)))
@@ -99,11 +106,22 @@ class FakeDaemon:
 class PortCollisionTest(unittest.TestCase):
     """A2 — with a daemon already on the port, attach instead of double-starting."""
 
-    def test_a2_a_served_port_is_attached_to_and_never_double_spawned(self) -> None:
+    def test_a2_a_served_port_is_refused_not_attached(self) -> None:
+        """A running daemon requires authentication, and this host did not mint its capability.
+
+        Before S2 the host attached to whatever was listening. It now refuses: that daemon's bootstrap
+        capability is single-use and may already be consumed, so attaching would mean falling back to
+        an unauthenticated API or reusing a token from a location a runtime could also read. The safety
+        property the old test protected -- never spawning a second daemon -- still holds, and the
+        refusal is explicit rather than silent.
+        """
         with FakeDaemon() as fake:
-            result = run_host(["--port", str(fake.port), "--probe-only"])
-            self.assertEqual(result["status"], "attached", result)
+            # A real launch, not a probe: probe-only is a diagnostic that reports attached/free, and
+            # the refusal belongs to the launch decision, which is where it protects the operator.
+            result = run_host(["--port", str(fake.port)])
+            self.assertEqual(result["status"], "attach_refused", result)
             self.assertEqual(result["port"], fake.port)
+            self.assertIn("authenticat", json.dumps(result).lower(), result)
 
     def test_a2_an_unserved_port_reports_free(self) -> None:
         port = free_port()

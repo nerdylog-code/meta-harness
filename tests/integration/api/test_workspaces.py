@@ -18,13 +18,13 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 for extra in (REPO_ROOT / "apps" / "daemon", REPO_ROOT / "packages" / "contracts"):
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-from metaharness.app import Settings, create_app  # noqa: E402
+from tests.support import authed_client  # noqa: E402
 
 
 def git(*args: str, cwd: Path) -> subprocess.CompletedProcess:
@@ -49,10 +49,7 @@ class WorkspaceTest(unittest.TestCase):
         git("commit", "-q", "-m", "base", cwd=self.repo)
         self.data_root = base / "data root"
         self.data_root.mkdir()
-        self.client = TestClient(
-            create_app(Settings(port=0, data_dir=str(self.data_root), serve_web=False))
-        )
-        self.client.__enter__()
+        self.client = authed_client(self.data_root)
         self.mission = self.client.post(
             "/v1/missions", json={"title": "Isolation", "objective": "two writers, no collision"}
         ).json()["mission_id"]
@@ -235,11 +232,8 @@ class WorkspaceTest(unittest.TestCase):
         self.acquire(task, "run_1", ttl_s=3600.0)
         # A lease held by a run that is not alive cannot be writing: the reconciler settles it.
         self.client.__exit__(None, None, None)
-        self.client = TestClient(
-            create_app(Settings(port=0, data_dir=str(self.data_root), serve_web=False))
-        )
-        self.client.__enter__()
-        report = self.client.get("/health").json()
+        self.client = authed_client(self.data_root)
+        report = self.client.get("/v1/system/health").json()
         self.assertIn("reconcile", json.dumps(report).lower())
         events = self.client.get("/v1/events?limit=300").json()["events"]
         settled = [
@@ -370,10 +364,7 @@ class WorkspaceTest(unittest.TestCase):
         self.acquire(task, "run_1", ttl_s=3600.0)
         before = self.inspect(task)
         self.client.__exit__(None, None, None)
-        self.client = TestClient(
-            create_app(Settings(port=0, data_dir=str(self.data_root), serve_web=False))
-        )
-        self.client.__enter__()
+        self.client = authed_client(self.data_root)
         after = self.inspect(task)
         self.assertEqual(after["locator"], view["locator"])
         self.assertEqual(after["base_commit"], before["base_commit"])

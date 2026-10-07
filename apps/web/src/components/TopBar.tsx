@@ -1,7 +1,7 @@
 /**
  * The topbar: daemon identity, the connection state, and the counters that are real today.
  *
- * Every number here comes from `/health` or from the socket. There is no cost, token or
+ * Every number here comes from authenticated `/v1/system/health` or from the socket. There is no cost, token or
  * heartbeat figure, because the daemon does not measure those yet -- inventing a `$0.00`
  * would be exactly the fake green the Book forbids (BOOK §82). They appear when usage
  * samples do.
@@ -10,11 +10,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchHealth } from "../api";
 import { useStream } from "../stream";
+import { useSession } from "../session";
 
 function ConnectionBadge() {
   const stream = useStream();
   const label =
-    stream.state === "live" ? "live" : stream.state === "connecting" ? "connecting" : "degraded";
+    stream.state === "live" ? "live" : stream.state === "connecting" ? "connecting" : stream.state === "unauthenticated" ? "unauthenticated" : "degraded";
   return (
     <span className={`badge ${stream.state === "live" ? "live" : stream.state === "connecting" ? "degraded" : "offline"}`}>
       {label}
@@ -36,15 +37,18 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 export function TopBar() {
   const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth, refetchInterval: 5000 });
+  const { actor } = useSession();
 
   return (
     <header className="topbar">
+      <Stat label="actor" value={actor ? `${actor.kind} · ${actor.display_name ?? actor.principal}` : "not authenticated"} />
       <Stat label="daemon" value={health.data ? `v${health.data.version}` : health.isError ? "unreachable" : "…"} />
       <Stat label="events" value={health.data ? String(health.data.store.events ?? 0) : "—"} />
       <Stat label="schema" value={health.data?.store.schema_version ? `v${health.data.store.schema_version}` : "—"} />
       <Stat label="subscribers" value={health.data ? String(health.data.events.subscribers) : "—"} />
       <Stat label="uptime" value={health.data ? `${Math.round(health.data.uptime_s)}s` : "—"} />
       <div className="spacer" />
+      <span className="topbar-constraint">Control transfer is not available because actor identity is not authenticated.</span>
       <ConnectionBadge />
     </header>
   );

@@ -7,6 +7,8 @@
  * starts lying about what the system can do.
  */
 
+import { csrfToken, fetchSession } from "./session";
+
 export interface Health {
   status: string;
   service: string;
@@ -83,13 +85,11 @@ export const ENVELOPE_KEYS = [
 
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(path, { headers: { accept: "application/json" } });
-  if (!response.ok) {
-    throw new Error(`${path} answered ${response.status} ${response.statusText}`);
-  }
+  if (!response.ok) await rejectResponse(path, response);
   return (await response.json()) as T;
 }
 
-export const fetchHealth = () => getJson<Health>("/health");
+export const fetchHealth = () => getJson<Health>("/v1/system/health");
 export const fetchVersion = () => getJson<VersionInfo>("/version");
 
 export async function fetchRecentEvents(limit = 20): Promise<EventEnvelope[]> {
@@ -201,15 +201,18 @@ export async function fetchSessionEvents(sessionId: string, limit = 300): Promis
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
+  if (!csrfToken()) await fetchSession();
+  const token = csrfToken();
   const response = await fetch(path, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      ...(token ? { "X-MetaHarness-CSRF": token } : {}),
+    },
     body: JSON.stringify(body),
   });
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`${path} answered ${response.status}: ${detail.slice(0, 300)}`);
-  }
+  if (!response.ok) await rejectResponse(path, response);
   return (await response.json()) as T;
 }
 
@@ -409,30 +412,39 @@ export class ApiRefusal extends Error {
   }
 }
 
+async function rejectResponse(path: string, response: Response): Promise<never> {
+  const text = await response.text();
+  let detail = text || response.statusText;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && "detail" in parsed) {
+      const raw = (parsed as { detail: unknown }).detail;
+      if (typeof raw === "string") detail = raw;
+    }
+  } catch {
+    // Preserve plain-text daemon detail.
+  }
+  const refusal = new ApiRefusal(path, response.status, detail);
+  if (typeof window !== "undefined" && (response.status === 401 || response.status === 403)) {
+    window.dispatchEvent(new CustomEvent("api-refusal", { detail: { status: refusal.status, detail: refusal.detail } }));
+  }
+  throw refusal;
+}
+
 /** POST/DELETE with the same shape as postJson, but refusals keep their status and detail. */
 async function sendJson<T>(method: "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
+  if (!csrfToken()) await fetchSession();
+  const token = csrfToken();
   const response = await fetch(path, {
     method,
-    headers:
-      body === undefined
-        ? { accept: "application/json" }
-        : { "content-type": "application/json", accept: "application/json" },
+    headers: {
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+      accept: "application/json",
+      ...(token ? { "X-MetaHarness-CSRF": token } : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!response.ok) {
-    const text = await response.text();
-    let detail = text;
-    try {
-      const parsed: unknown = JSON.parse(text);
-      if (parsed && typeof parsed === "object" && "detail" in parsed) {
-        const raw = (parsed as { detail: unknown }).detail;
-        if (typeof raw === "string") detail = raw;
-      }
-    } catch {
-      // not JSON: the raw body text is the detail
-    }
-    throw new ApiRefusal(path, response.status, detail.slice(0, 500));
-  }
+  if (!response.ok) await rejectResponse(path, response);
   return (await response.json()) as T;
 }
 
@@ -705,20 +717,7 @@ export interface ArtifactListFilters {
 
 async function getArtifactJson<T>(path: string): Promise<T> {
   const response = await fetch(path, { headers: { accept: "application/json" } });
-  if (!response.ok) {
-    const text = await response.text();
-    let detail = text;
-    try {
-      const parsed: unknown = JSON.parse(text);
-      if (parsed && typeof parsed === "object" && "detail" in parsed) {
-        const raw = (parsed as { detail: unknown }).detail;
-        if (typeof raw === "string") detail = raw;
-      }
-    } catch {
-      // Keep the daemon's plain-text refusal detail.
-    }
-    throw new ApiRefusal(path, response.status, detail.slice(0, 500));
-  }
+  if (!response.ok) await rejectResponse(path, response);
   return (await response.json()) as T;
 }
 
@@ -752,20 +751,7 @@ export async function fetchArtifactContent(
   const suffix = query.size ? `?${query.toString()}` : "";
   const path = `/v1/artifacts/${encodeURIComponent(artifactId)}/content${suffix}`;
   const response = await fetch(path);
-  if (!response.ok) {
-    const text = await response.text();
-    let detail = text;
-    try {
-      const parsed: unknown = JSON.parse(text);
-      if (parsed && typeof parsed === "object" && "detail" in parsed) {
-        const raw = (parsed as { detail: unknown }).detail;
-        if (typeof raw === "string") detail = raw;
-      }
-    } catch {
-      // Keep the daemon's plain-text refusal detail.
-    }
-    throw new ApiRefusal(path, response.status, detail.slice(0, 500));
-  }
+  if (!response.ok) await rejectResponse(path, response);
   return response;
 }
 

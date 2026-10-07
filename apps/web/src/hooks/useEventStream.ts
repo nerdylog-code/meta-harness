@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EventEnvelope, eventStreamUrl } from "../api";
 
-export type StreamState = "connecting" | "live" | "degraded";
+export type StreamState = "connecting" | "live" | "degraded" | "unauthenticated";
 
 const MAX_BACKLOG = 500;
 const BASE_DELAY_MS = 1000;
@@ -49,8 +49,10 @@ export function useEventStream(): EventStream {
       return;
     }
     socketRef.current = socket;
+    let opened = false;
 
     socket.onopen = () => {
+      opened = true;
       setState("live");
       setError(null);
       setAttempts(0);
@@ -71,6 +73,11 @@ export function useEventStream(): EventStream {
     };
     socket.onclose = () => {
       if (closedRef.current) return;
+      if (!opened) {
+        setState("unauthenticated");
+        setError("The event stream was rejected before connecting. Open the app through the daemon’s bootstrap link.");
+        return;
+      }
       setState("degraded");
       setAttempts((current) => {
         const next = current + 1;

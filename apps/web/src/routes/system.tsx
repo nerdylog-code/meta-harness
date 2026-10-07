@@ -2,7 +2,7 @@
  * Runtime: everything the daemon will tell you about itself.
  *
  * This page is where "is it healthy?" gets an answer with paths, versions and journal modes
- * rather than a green dot. It reads `/health` and `/version` and shows both verbatim.
+ * rather than a green dot. It reads authenticated `/v1/system/health` and public `/version`.
  */
 
 import { useQuery } from "@tanstack/react-query";

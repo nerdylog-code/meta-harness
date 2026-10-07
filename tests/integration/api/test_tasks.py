@@ -14,20 +14,19 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 for extra in (REPO_ROOT / "apps" / "daemon", REPO_ROOT / "packages" / "contracts"):
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-from metaharness.app import Settings, create_app  # noqa: E402
+from tests.support import authed_client  # noqa: E402
 
 
 class WorkGraphTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="wg-api-")
-        self.client = TestClient(create_app(Settings(port=0, data_dir=self._tmp.name, serve_web=False)))
-        self.client.__enter__()
+        self.client = authed_client(self._tmp.name)
         self.mission = self.client.post(
             "/v1/missions", json={"title": "Factory", "objective": "prove the graph"}
         ).json()["mission_id"]
@@ -103,8 +102,7 @@ class WorkGraphTest(unittest.TestCase):
         before = self.graph()
         edges_before = {task["id"]: task["dependencies"] for task in before["tasks"]}
         self.client.__exit__(None, None, None)
-        self.client = TestClient(create_app(Settings(port=0, data_dir=self._tmp.name, serve_web=False)))
-        self.client.__enter__()
+        self.client = authed_client(self._tmp.name)
         after = self.graph()
         self.assertEqual(
             {task["id"]: task["dependencies"] for task in after["tasks"]},
@@ -167,8 +165,7 @@ class WorkGraphTest(unittest.TestCase):
 
         before = self.graph()
         self.client.__exit__(None, None, None)
-        self.client = TestClient(create_app(Settings(port=0, data_dir=self._tmp.name, serve_web=False)))
-        self.client.__enter__()
+        self.client = authed_client(self._tmp.name)
         after = self.graph()
         self.assertEqual(
             [(task["id"], task["state"], task["dependencies"], task["run_id"]) for task in after["tasks"]],

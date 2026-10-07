@@ -15,12 +15,12 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 if str(REPO_ROOT / "apps" / "daemon") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "apps" / "daemon"))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-from metaharness.app import Settings, create_app  # noqa: E402
+from tests.support import authed_client  # noqa: E402
 from metaharness.store.migrations import discover  # noqa: E402
 from metaharness_contracts import IdKind, new_id  # noqa: E402
 
@@ -28,17 +28,12 @@ FAKE = REPO_ROOT / "tests" / "fixtures" / "pi_fake_rpc.py"
 FAKE_ARGV = [sys.executable, str(FAKE), "--emit-tools"]
 
 
-def make_settings(data_dir: str, argv: list[str] | None = None) -> Settings:
-    return Settings(port=0, data_dir=data_dir, serve_web=False, pi_argv=argv or FAKE_ARGV)
-
-
 class ApiTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="mh-api-")
         self.root = self._tmp.name
-        self.app = create_app(make_settings(self.root))
-        self.client = TestClient(self.app)
-        self.client.__enter__()
+        self.client = authed_client(self.root, pi_argv=FAKE_ARGV)
+        self.app = self.client.app
 
     def tearDown(self) -> None:
         self.client.__exit__(None, None, None)
@@ -198,7 +193,7 @@ class SessionApiTest(ApiTestCase):
 class RestartTest(unittest.TestCase):
     def test_a6_the_mission_agent_and_history_survive_a_restart(self) -> None:
         with tempfile.TemporaryDirectory(prefix="mh-restart-") as root:
-            first = TestClient(create_app(make_settings(root)))
+            first = authed_client(root, pi_argv=FAKE_ARGV)
             with first:
                 mission_id = first.post("/v1/missions", json={"title": "M1"}).json()["mission_id"]
                 agent_id = first.post("/v1/agents", json={"display_name": "Nova"}).json()["agent_id"]
@@ -214,15 +209,15 @@ class RestartTest(unittest.TestCase):
                         break
                     time.sleep(0.3)
                 ids_before = {event["id"] for event in events}
-                seq_before = first.get("/health").json()["events"]["last_seq"]
+                seq_before = first.get("/v1/system/health").json()["events"]["last_seq"]
 
-            second_app = create_app(make_settings(root))
-            second = TestClient(second_app)
+            second = authed_client(root, pi_argv=FAKE_ARGV)
+            second_app = second.app
             with second:
                 missions = second.get("/v1/missions").json()
                 agents = second.get("/v1/agents").json()
                 sessions = second.get("/v1/sessions").json()
-                health = second.get("/health").json()
+                health = second.get("/v1/system/health").json()
 
                 self.assertEqual(missions["count"], 1)
                 self.assertEqual(missions["missions"][0]["id"], mission_id)

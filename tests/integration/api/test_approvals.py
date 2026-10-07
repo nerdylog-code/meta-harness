@@ -13,13 +13,13 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 for extra in (REPO_ROOT / "apps" / "daemon", REPO_ROOT / "packages" / "contracts"):
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-from metaharness.app import Settings, create_app  # noqa: E402
+from tests.support import CSRF_HEADER, TEST_ORIGIN, authed_client, unauth_client  # noqa: E402
 
 PAYLOAD = {"branch": "v2/control-plane", "task": "tsk_one"}
 
@@ -27,8 +27,7 @@ PAYLOAD = {"branch": "v2/control-plane", "task": "tsk_one"}
 class ApprovalTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="ap-api-")
-        self.client = TestClient(create_app(Settings(port=0, data_dir=self._tmp.name, serve_web=False)))
-        self.client.__enter__()
+        self.client = authed_client(self._tmp.name)
 
     def tearDown(self) -> None:
         self.client.__exit__(None, None, None)
@@ -107,14 +106,30 @@ class ApprovalTest(unittest.TestCase):
         self.assertEqual(again.status_code, 409, again.text)
         self.assertIn("already consumed", again.json()["detail"])
 
-    def test_b6_r4_without_a_named_human_is_refused(self) -> None:
+    def test_b6_r4_needs_an_authenticated_operator_not_a_name(self) -> None:
+        """The authority moved from a string in the body to the authenticated actor.
+
+        Before S2 this asserted that a nameless grant was refused, because the only thing standing in
+        for a human was a non-empty name. The rule is still enforced -- an unauthenticated caller
+        cannot grant an R4 at all -- but it is enforced by the session now, which is a stronger
+        guarantee, not a weaker one. The expectation changed because the semantics changed on purpose.
+        """
         approval = self.ask(action_type="deploy.production", action_payload={"env": "prod"}, risk_level="R4")
         self.assertTrue(approval["requires_human"])
-        nameless = self.client.post(f"/v1/approvals/{approval['id']}/grant", json={"by": ""})
-        self.assertEqual(nameless.status_code, 409, nameless.text)
-        self.assertIn("human approver", nameless.json()["detail"])
+
+        unauthenticated = unauth_client(self._tmp.name)
+        refused = unauthenticated.post(
+            f"/v1/approvals/{approval['id']}/grant",
+            json={"by": "Daniel"},
+            headers={"origin": TEST_ORIGIN, CSRF_HEADER: "guessed"},
+        )
+        self.assertEqual(refused.status_code, 401, refused.text)
         self.assertEqual(self.client.get(f"/v1/approvals/{approval['id']}").json()["state"], "pending")
-        self.grant(approval["id"], by="daniel")
+
+        # An authenticated operator is the authority, and does not have to type a name to be one.
+        granted = self.client.post(f"/v1/approvals/{approval['id']}/grant", json={"by": ""})
+        self.assertEqual(granted.status_code, 200, granted.text)
+        self.assertEqual(granted.json()["state"], "granted")
         self.assertEqual(self.consume(approval["id"], {"env": "prod"}, "deploy.production").status_code, 200)
 
     def test_b7_an_approval_for_one_task_does_not_authorise_another(self) -> None:
@@ -138,8 +153,7 @@ class ApprovalTest(unittest.TestCase):
         digest_before = self.client.app.state.store.projection_digest()  # type: ignore[attr-defined]
 
         self.client.__exit__(None, None, None)
-        self.client = TestClient(create_app(Settings(port=0, data_dir=self._tmp.name, serve_web=False)))
-        self.client.__enter__()
+        self.client = authed_client(self._tmp.name)
 
         after = {view["id"]: view["state"] for view in self.client.get("/v1/approvals").json()["approvals"]}
         self.assertEqual(after, before, "every state survived the restart")

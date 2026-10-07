@@ -531,3 +531,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 @media (max-width: 900px) { .canvas-layout { grid-template-columns: 1fr; } .canvas-inspector { order: -1; } .canvas-flow { height: 65vh; } }
 @media (max-width: 540px) { .canvas-flow { min-height: 24rem; height: 58vh; } .canvas-toolbar { align-items: flex-start; } }
 @media (prefers-reduced-motion: reduce) { .canvas-flow *, .canvas-flow *::before, .canvas-flow *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }
+
+.session-notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--panel-2);
+  font-size: 0.76rem;
+}
+.session-notice.unauthenticated { color: var(--error); border-color: var(--error); }
+.session-notice.refused { color: var(--warn); border-color: var(--warn); }
+.session-notice span { overflow-wrap: anywhere; }
+.session-notice button { margin-left: auto; min-height: 2rem; }
+.topbar-constraint { color: var(--warn); font-size: 0.66rem; }
+@media (max-width: 720px) { .topbar-constraint { flex-basis: 100%; } }

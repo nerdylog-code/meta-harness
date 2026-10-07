@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import httpx
 import socket
 import sys
 import tempfile
@@ -45,6 +46,8 @@ class LiveDaemon:
         self.data_dir = data_dir
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None
+        self.session_cookie = ""
+        self.csrf = ""
 
     def __enter__(self) -> "LiveDaemon":
         settings = Settings(host="127.0.0.1", port=self.port, data_dir=self.data_dir, serve_web=False)
@@ -55,6 +58,16 @@ class LiveDaemon:
         deadline = time.time() + BOOT_TIMEOUT_S
         while time.time() < deadline:
             if self._server.started:
+                with httpx.Client(timeout=10) as client:
+                    bootstrap_url = (Path(self.data_dir) / "bootstrap.url").read_text(encoding="utf-8").strip()
+                    bootstrap = client.get(bootstrap_url, follow_redirects=False)
+                    if bootstrap.status_code != 303:
+                        raise RuntimeError(f"real bootstrap failed: {bootstrap.status_code}")
+                    self.session_cookie = client.cookies.get("mh_session") or ""
+                    session = client.get(f"http://127.0.0.1:{self.port}/v1/session")
+                    self.csrf = session.json()["csrf"]
+                if not self.session_cookie or not self.csrf:
+                    raise RuntimeError("real bootstrap did not establish a session")
                 return self
             if self._thread.is_alive() is False:
                 raise RuntimeError("daemon thread died during startup")
@@ -74,6 +87,12 @@ class LiveDaemon:
                     "the daemon did not shut down within 15s; the store file is still held open"
                 )
 
+    def websocket_headers(self) -> dict[str, str]:
+        return {
+            "Cookie": f"mh_session={self.session_cookie}",
+            "Origin": f"http://127.0.0.1:{self.port}",
+        }
+
     @property
     def ws_url(self) -> str:
         return f"ws://127.0.0.1:{self.port}/v1/events/ws"
@@ -88,7 +107,7 @@ class TestEventStream(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, LiveDaemon(tmp) as daemon:
             async def scenario() -> list[dict]:
                 frames: list[dict] = []
-                async with websockets.connect(daemon.ws_url) as socket_:
+                async with websockets.connect(daemon.ws_url, additional_headers=daemon.websocket_headers()) as socket_:
                     for _ in range(3):
                         raw = await asyncio.wait_for(socket_.recv(), READ_TIMEOUT_S)
                         frames.append(json.loads(raw))
@@ -106,7 +125,7 @@ class TestEventStream(unittest.TestCase):
     def test_stream_receives_live_events_after_connect(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, LiveDaemon(tmp) as daemon:
             async def scenario() -> dict:
-                async with websockets.connect(daemon.ws_url) as socket_:
+                async with websockets.connect(daemon.ws_url, additional_headers=daemon.websocket_headers()) as socket_:
                     # drain the backlog first
                     while True:
                         frame = json.loads(await asyncio.wait_for(socket_.recv(), READ_TIMEOUT_S))
@@ -122,7 +141,7 @@ class TestEventStream(unittest.TestCase):
     def test_compatibility_alias_route_streams_too(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, LiveDaemon(tmp) as daemon:
             async def scenario() -> str:
-                async with websockets.connect(daemon.alias_ws_url) as socket_:
+                async with websockets.connect(daemon.alias_ws_url, additional_headers=daemon.websocket_headers()) as socket_:
                     frame = json.loads(await asyncio.wait_for(socket_.recv(), READ_TIMEOUT_S))
                 return frame["kind"]
 
@@ -134,7 +153,7 @@ class TestEventStream(unittest.TestCase):
         import httpx
 
         with tempfile.TemporaryDirectory() as tmp, LiveDaemon(tmp) as daemon:
-            with httpx.Client(base_url=f"http://127.0.0.1:{daemon.port}", timeout=10) as client:
+            with httpx.Client(base_url=f"http://127.0.0.1:{daemon.port}", timeout=10, cookies={"mh_session": daemon.session_cookie}) as client:
                 self.assertEqual(client.get("/health").json()["status"], "ok")
                 self.assertEqual(client.get("/version").json()["api_version"], "v1")
 

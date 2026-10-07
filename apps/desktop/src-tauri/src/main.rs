@@ -158,14 +158,51 @@ fn main() {
                             continue;
                         };
                         match status.get("status").and_then(|value| value.as_str()) {
-                            Some("started") | Some("attached") => {
-                                let url = status
-                                    .get("url")
+                            Some("started") => {
+                                let bootstrap_file = status
+                                    .get("bootstrap_file")
+                                    .and_then(|value| value.as_str());
+                                let bootstrap_url = bootstrap_file
+                                    .and_then(|path| std::fs::read_to_string(path).ok())
+                                    .map(|value| value.trim().to_string())
+                                    .filter(|value| {
+                                        let prefixes = [
+                                            format!("http://127.0.0.1:{port}/auth/bootstrap?capability="),
+                                            format!("http://localhost:{port}/auth/bootstrap?capability="),
+                                        ];
+                                        prefixes.iter().any(|prefix| {
+                                            value.strip_prefix(prefix).is_some_and(|capability| {
+                                                !capability.is_empty()
+                                                    && capability.bytes().all(|byte| {
+                                                        byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
+                                                    })
+                                            })
+                                        })
+                                    });
+                                if let Some(url) = bootstrap_url {
+                                    let target = serde_json::to_string(&url).unwrap_or_default();
+                                    let _ = navigator.eval(&format!("window.location.replace({target});"));
+                                } else {
+                                    show(
+                                        &navigator,
+                                        "<h1>Meta-Harness could not authenticate</h1>\
+                                         <p>The daemon has no fresh bootstrap capability. Close this window, \
+                                         stop the daemon, and relaunch Meta-Harness.</p>",
+                                    );
+                                }
+                                return;
+                            }
+                            Some("attach_refused") => {
+                                let reason = status
+                                    .get("reason")
                                     .and_then(|value| value.as_str())
-                                    .map(str::to_string)
-                                    .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
-                                let target = serde_json::to_string(&url).unwrap_or_default();
-                                let _ = navigator.eval(&format!("window.location.replace({target});"));
+                                    .unwrap_or("The running daemon requires authentication.");
+                                show(
+                                    &navigator,
+                                    &format!(
+                                        "<h1>Meta-Harness did not attach</h1><p>{reason}</p>"
+                                    ),
+                                );
                                 return;
                             }
                             Some("failed") => {
