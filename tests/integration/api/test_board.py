@@ -191,7 +191,10 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(self.start(c, run_c).status_code, 200)
         self.assertEqual(self.complete(c, run_id=run_c).status_code, 200)
         lanes = self.lanes()
-        self.assertEqual(lanes["DONE"], sorted([a, b, c]))
+        # Membership, not order: a lane is ordered by creation time while ids sort by their own
+        # timestamp, and the two can disagree by a millisecond. What the board promises is which
+        # tasks are in the lane.
+        self.assertEqual(sorted(lanes["DONE"]), sorted([a, b, c]))
         self.assertEqual(lanes["READY"], [d], "D is ready once both blockers are satisfied")
         self.assertEqual(self.card(d)["lane"], "READY")
         self.assertEqual(self.card(d)["reasons"], [], "a ready task has no reason to explain")
