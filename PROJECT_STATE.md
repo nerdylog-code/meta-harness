@@ -115,8 +115,8 @@ nothing today bounds what a migrated agent may execute. The handoff rendering no
 acknowledgement instead of open work, which is the right ask for a transfer -- but a scratch
 directory is not a sandbox, and the script says so.
 
-**496 tests green locally** across 8 suites (v1 21, unit 63, contracts 113, store 57, integration
-176, replay 21, conformance 34, desktop 11) and the CI matrix is green on `ubuntu-latest` and
+**547 tests green locally** across 8 suites (v1 21, unit 84, contracts 113, store 57, integration
+206, replay 21, conformance 34, desktop 11) and the CI matrix is green on `ubuntu-latest` and
 `windows-latest`. `master` and the tag `v0.1-hermes-hosted` are untouched.
 
 | WP | State |
@@ -216,6 +216,38 @@ sent (`unchecked`, because drawing a graph must not hash every file).
 screen: control transfer is unavailable because actor identity is not authenticated. No node exists
 for a capability whose canonical state does not exist yet.
 
+**Security Gate S2 — S2A complete, S2B partial (ADR-0020).** Loopback is not authentication, and S1
+proved the cost: a sandboxed runtime reached the daemon's own API and read another session's
+transcript. S2A closes that.
+
+**S2A.** An `ActorContext` carries request-scoped authority, and authority is a **kind, not a name**:
+the R3/R4 grant reads the authenticated actor, so a runtime can no longer approve its own action by
+typing a person's name, and `approved_by` stays a label. Credentials are opaque, per-launch and in
+memory -- single-use bootstrap capabilities with a short TTL, opaque session cookies, a per-session
+CSRF token -- so a restart invalidates every session with no revocation list, and there is **no
+endpoint that hands out authority**. The bootstrap travels over a private channel the operator already
+owns: a `0600` file inside the daemon's own data root, consumed once and deleted. One pure-ASGI gate
+covers HTTP and websocket: non-loopback peers refused, `Host` validated (loopback binding does not stop
+a DNS-rebinding attack), a session required on `/v1/*` **including reads** so no event backlog is
+emitted before authentication, and Origin plus CSRF required on mutations. `/health` and `/version` are
+minimal; the full picture is an authenticated `/v1/system/health`. Proven by 30 tests that attack the
+daemon the way the S1 agent did, 24 checks in real headless Chromium, and a structural test requiring
+that no runtime adapter and no sandbox provider can even name the auth module.
+
+**S2B.** The egress broker decides where a sandbox may connect: allowlist by hostname with
+suffix-boundary matching (`*.example.com` never matches `evil-example.com`), port 443 only, every
+resolved address inspected with private/loopback/link-local/multicast/unspecified/special ranges
+refused unconditionally, and `CONNECT` bound to the TLS ClientHello's SNI without interception or a
+fake CA. `enforcement_level` keeps the claim honest: `deny` strong only when measured, `unrestricted`
+weak, `allowlist` strong **only** when the direct route is closed and that was measured. `deny` is
+already strong and was measured in M3.
+
+**What S2B does not yet claim.** The transport that would make the broker the *only* path -- a shim
+plus a mounted unix socket inside a network-less sandbox -- is **not built**, so `allowlist` is not
+claimed strong and no real provider call has been made through the broker. The transport is POSIX-only
+by design (`asyncio.start_unix_server` does not exist on Windows): the decision layer is verified on
+Windows, the transport skips with that exact reason, and no parity is faked.
+
 ## Working (verified in this checkout)
 
 - **Daemon** `apps/daemon/metaharness`: `GET /health`, `GET /version`, `GET /v1/events`, `WS /v1/events/ws` (+ `/events/ws` alias), loopback-only guard, optional static mount of the web bundle.
@@ -253,7 +285,7 @@ for a capability whose canonical state does not exist yet.
   say why they are unavailable, five canonical budgets with per-dimension enforcement levels, and
   `tests/integration/sandbox/test_execution_boundary.py` (10 tests, 1 skip where no strong provider
   exists). `scripts/e2e_m3.py` exits 0 with 31 checks against the real runtime.
-- **Tests**: v1 regression 21/21 · unit 63/63 (work-graph rules, board placement, waves and explanations) · contracts 113/113 · store 57/57 · integration 176/176 (agents 10, migration 10, tasks 20, board 18, canvas 18, approvals 16, artifacts 16, workspaces 24, execution-boundary 10, event-stream 4, process-supervisor 13, pi-transport 17) · replay 21/21 (reconciliation 10, equivalence 5, restart-and-crash 6) · conformance 34/34 (2 skips, by design) · desktop 11/11 — **496 measured by `scripts/test.py`**, which is the only number to trust: earlier notes in this file quoted a total that was never counted, and this one was read off the runner's own output. The suites exercise a real server, real websockets, real process trees and real hard kills; the whole default run is ~2 min.
+- **Tests**: v1 regression 21/21 · unit 63/63 (work-graph rules, board placement, waves and explanations) · contracts 113/113 · store 57/57 · integration 206/206 (auth 30, agents 10, migration 10, tasks 20, board 18, canvas 18, approvals 16, artifacts 16, workspaces 24, execution-boundary 10, event-stream 4, process-supervisor 13, pi-transport 17) · replay 21/21 (reconciliation 10, equivalence 5, restart-and-crash 6) · conformance 34/34 (2 skips, by design) · desktop 11/11 — **547 measured by `scripts/test.py`**, which is the only number to trust: earlier notes in this file quoted a total that was never counted, and this one was read off the runner's own output. The suites exercise a real server, real websockets, real process trees and real hard kills; the whole default run is ~2 min.
 - **ProcessSupervisor** `apps/daemon/metaharness/process`: one interface, two OS implementations, pre-signal tree snapshot, verified kill (`orphan_check` inside the emitted event), bounded streams, wall-timeout budget. Design and the orphan bug it fixed: `docs/architecture/PROCESS_SUPERVISION.md`.
 - **Web shell** `apps/web` (WP-006): Vite + React + TS + TanStack Query + TanStack Router (code-based routes), one websocket owned by a context provider, connection state that distinguishes live from degraded from connecting, an event inspector that always says whether it is showing the live socket or the durable backlog, and a sidebar that marks unbuilt surfaces as `soon` instead of linking to nowhere. Built bundle is served by the daemon with an SPA fallback; deep links work and path traversal is refused (403, verified with `curl --path-as-is`). DOM verified in headless Chromium: the shell renders, the badge reads `live`, and the log's events appear.
 - **CI** `.github/workflows/ci.yml`: matrix `ubuntu-latest` + `windows-latest`, seven suites (v1, unit, contracts, store, integration, replay, conformance), plus a web job gated on `apps/web/package.json`.
@@ -271,7 +303,11 @@ paper. The desktop shell exists: a window plus a Python host (ADR-0009,
 
 ## Next
 
-**S2 — actor authentication and selective egress** (the current one). The Architect's order, revised
+**S2B's transport** (the current one): the shim and the mounted socket that would make the broker the
+only connected path, then a real provider call through it, so `allowlist` can be called strong on
+evidence rather than on intent.
+
+**Historical.** The previous milestone was S2A/S2B as described above. Before that: The Architect's order, revised
 so identity comes before mutation: **Workboard → Canvas V1 → S2 → Local Computer / Live Workspace →
 Human ↔ Agent control transfer.** The canvas was deliberately built without control transfer because
 the control plane cannot yet prove who is asking; every surface that would mutate on a human's behalf
