@@ -19,6 +19,22 @@ process, and a daemon restart after which Nova, the mission, the session history
 are still there. `scripts/e2e_m1.py` is that proof, run by hand because it needs the binary, a
 provider and real credit.
 
+**Artifact Inspector — complete (core).** A human reviewing a task or an approval can inspect the
+durable evidence instead of trusting an id or a model-written summary. There is one Artifact API and
+one canonical record (`artifact.created` → the `artifacts` projection); every surface reads from it.
+Integrity is verified on read by recomputing the sha256 and comparing it with the recorded one, so a
+tampered file is `mismatch`, a deleted file is `missing`, and neither is ever served: the content
+endpoint answers 409 with the reason. The host path never leaves the daemon -- the view carries a
+storage locator relative to the data root. The preview follows the MIME and refuses to guess: text,
+JSON and markdown get a bounded preview (truncation is stated, and a larger offset can be requested),
+images are served as bytes for the browser, and anything else is `binary` with a reason and a
+download. The list reports `unchecked` because verifying every artifact on every poll would read
+every byte on every poll, and saying `ok` without reading is how an inspector starts lying.
+
+**Honest limit:** artifact access is not yet *authorised* per task or workspace. The origin (mission,
+task, run, agent) is recorded, immutable and filterable, but the API is loopback-only with no actor
+identity, so who may read which artifact is the S2 auth work, not something this gate enforces.
+
 **Approvals — complete (core).** Proposal ≠ approval ≠ execution ≠ acceptance, and an approval
 authorises **one exact action**: `approval.requested / granted / denied / expired / consumed` are
 canonical events, and the binding is `action_payload_hash` over the action type and the payload
@@ -97,8 +113,8 @@ nothing today bounds what a migrated agent may execute. The handoff rendering no
 acknowledgement instead of open work, which is the right ask for a transfer -- but a scratch
 directory is not a sandbox, and the script says so.
 
-**404 tests green locally** across 8 suites (v1 21, unit 48, contracts 113, store 57, integration
-99, replay 21, conformance 34, desktop 11) and the CI matrix is green on `ubuntu-latest` and
+**420 tests green locally** across 8 suites (v1 21, unit 48, contracts 113, store 57, integration
+115, replay 21, conformance 34, desktop 11) and the CI matrix is green on `ubuntu-latest` and
 `windows-latest`. `master` and the tag `v0.1-hermes-hosted` are untouched.
 
 | WP | State |
@@ -133,6 +149,11 @@ directory is not a sandbox, and the script says so.
 - **Scripts**: `python scripts/dev.py | test.py | doctor.py | package.py` — no Bash, no `shell=True`, works from PowerShell and POSIX.
 - **Canonical store** `apps/daemon/metaharness/store` (WP-004): SQLite WAL, three numbered migrations, `BEGIN IMMEDIATE` per append, `seq` assigned inside the transaction and gap-free, append-only enforced by triggers, idempotent by event id, content-addressed artifacts with no blob column, JSONL export that is derived only. One call proves replay: `uv run python -c "import asyncio, metaharness.store as s; print(asyncio.run(s.replay_equivalence_check()))"`.
 - **Boot reconciliation** `apps/daemon/metaharness/reconcile`: reads persisted state, asks a `ProcessProbe`, appends `run.interrupted` with `orphaned=true`, and never resumes work. Deliberately outside the store.
+- **Artifact inspector**: `apps/daemon/metaharness/api/artifacts.py` over the existing
+  content-addressed store (`put_artifact`, `artifact_bytes` verifying the address on read) and the
+  `artifacts` projection. Tests: `tests/integration/api/test_artifacts.py` -- the nine negatives the
+  Architect listed (tampered bytes, missing bytes, a lying record, cross-task attribution, path
+  traversal, unbounded preview, an unsupported MIME, restart, replay) plus the positive paths.
 - **Approvals**: `apps/daemon/metaharness/{migrations/0008_approvals.sql,projections/approvals.py,api/approvals.py}`
   built on the frozen `ApprovalRequest` contract (`grant`, `authorises`, `require`, `requires_human`,
   `payload_hash`, `NON_DELEGABLE_RISK`). Tests: `tests/integration/api/test_approvals.py` -- the nine
@@ -149,7 +170,7 @@ directory is not a sandbox, and the script says so.
   say why they are unavailable, five canonical budgets with per-dimension enforcement levels, and
   `tests/integration/sandbox/test_execution_boundary.py` (9 tests, 1 skip where no strong provider
   exists). `scripts/e2e_m3.py` exits 0 with 31 checks against the real runtime.
-- **Tests**: v1 regression 21/21 · unit 48/48 (includes the 14 work-graph rule tests) · contracts 113/113 · store 57/57 · integration 99/99 (9 execution-boundary, 20 work-graph, 16 approvals) · replay 21/21 · conformance 34/34 (2 skips, by design) · desktop 11/11 — **404 measured by `scripts/test.py`**, which is the only number to trust: earlier notes in this file quoted a total that was never counted, and this one was read off the runner's own output. The suites exercise a real server, real websockets, real process trees and real hard kills; the whole default run is ~2 min.
+- **Tests**: v1 regression 21/21 · unit 48/48 (includes the 14 work-graph rule tests) · contracts 113/113 · store 57/57 · integration 115/115 (9 execution-boundary, 20 work-graph, 16 approvals, 16 artifacts) · replay 21/21 · conformance 34/34 (2 skips, by design) · desktop 11/11 — **420 measured by `scripts/test.py`**, which is the only number to trust: earlier notes in this file quoted a total that was never counted, and this one was read off the runner's own output. The suites exercise a real server, real websockets, real process trees and real hard kills; the whole default run is ~2 min.
 - **ProcessSupervisor** `apps/daemon/metaharness/process`: one interface, two OS implementations, pre-signal tree snapshot, verified kill (`orphan_check` inside the emitted event), bounded streams, wall-timeout budget. Design and the orphan bug it fixed: `docs/architecture/PROCESS_SUPERVISION.md`.
 - **Web shell** `apps/web` (WP-006): Vite + React + TS + TanStack Query + TanStack Router (code-based routes), one websocket owned by a context provider, connection state that distinguishes live from degraded from connecting, an event inspector that always says whether it is showing the live socket or the durable backlog, and a sidebar that marks unbuilt surfaces as `soon` instead of linking to nowhere. Built bundle is served by the daemon with an SPA fallback; deep links work and path traversal is refused (403, verified with `curl --path-as-is`). DOM verified in headless Chromium: the shell renders, the badge reads `live`, and the log's events appear.
 - **CI** `.github/workflows/ci.yml`: matrix `ubuntu-latest` + `windows-latest`, seven suites (v1, unit, contracts, store, integration, replay, conformance), plus a web job gated on `apps/web/package.json`.
@@ -167,11 +188,13 @@ paper. The desktop shell exists: a window plus a Python host (ADR-0009,
 
 ## Next
 
-**Artifact Inspector** (the current one). The order the Architect set: **Approvals → Artifact
-Inspector → Worktree Allocator → Workboard → Canvas.** The gate exists; what does not exist yet is
-the surface where the person deciding can *see* the artifact a task produced (bytes, provenance,
-hash) instead of trusting a reference. After that, and before Swarm: **S2 — selective egress +
-control plane auth**, which is also what makes the approver's identity verifiable.
+**Worktree Allocator** (the current one). The order the Architect set: **Approvals → Artifact
+Inspector → Worktree Allocator → Workboard → Canvas.** Work, authority and evidence exist; what does
+not exist yet is the allocator that gives a task an isolated working copy with a single writer, so
+two runs cannot fight over one workspace (BOOK §26/§28). **Live Workspace / takeover does not start
+before WriterLease and worktrees exist**, and **S2 — selective egress + control plane auth** stays
+registered before Swarm, because it is also what makes the approver's identity and per-task artifact
+access verifiable.
 
 **S2 — Selective Egress + Control Plane Auth** is registered as the next security gate, before
 Swarm/Factory, and deliberately not built yet: the S1 run showed an agent with an open network
