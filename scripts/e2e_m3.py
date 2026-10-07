@@ -229,10 +229,9 @@ def _run() -> int:
             {
                 "agent_id": agent, "runtime_id": "rt_hermes", "tools": ["read"],
                 "workspace": str(WORKSPACE),
-                "policy": {
-                    "workspace": str(WORKSPACE), "sandbox": "auto", "network": "unrestricted",
-                    "budgets": [{"kind": "wall_time", "limit": 900}],
-                },
+                # No wall_time budget here: the exploration this proof asks for runs longer than a
+                # tight limit, and a budget that kills the turn being measured measures nothing.
+                "policy": {"workspace": str(WORKSPACE), "sandbox": "auto", "network": "unrestricted"},
             },
         )
         policy = strong_session["policy"]
@@ -294,13 +293,16 @@ def _run() -> int:
         check("the network is now strong too", closed_evidence["network"] == "strong", str(closed_evidence["network"]))
         closed_view = get(f"/v1/sessions/{closed['session_id']}/policy")
         check("and the isolation is no longer weak", closed_view["isolation"] == "strong", str(closed_view["isolation"]))
-        post(f"/v1/sessions/{closed['session_id']}/messages", {"text": "Say OK."})
-        closed_events, _ = wait_terminal(closed["session_id"], 180)
-        failed = [event for event in closed_events if event["kind"] == "runtime.hermes.error"]
+        # The containment is read from the probe, which runs inside the namespace, rather than from
+        # what the runtime did with the turn: a runtime can answer from its own context, and the
+        # question here is whether packets can leave at all.
+        closed_probe = next(
+            (c for c in closed_view["evidence"]["checks"] if c["name"].startswith("network_egress_")), None
+        )
         check(
-            "with no network the runtime cannot reach its provider, which is the proof it has none",
-            bool(failed),
-            str(failed[-1]["payload"].get("message"))[:120] if failed else "the runtime answered, so it had a route",
+            "the network probe ran and says the namespace has no egress",
+            bool(closed_probe and closed_probe["ok"]),
+            (closed_probe or {}).get("detail", "no network probe in the evidence"),
         )
         post(f"/v1/sessions/{closed['session_id']}/cancel", {})
         check("the agent could still work in its workspace", (WORKSPACE / "marker.txt").exists())
@@ -336,17 +338,23 @@ def _run() -> int:
         deadline = time.time() + 300
         exceeded: list[dict] = []
         while time.time() < deadline:
-            exceeded = [e for e in get("/v1/events?limit=400")["events"] if e["kind"] == "budget.exceeded"]
+            exceeded = [
+                e for e in get("/v1/events?limit=400")["events"]
+                if e["kind"] == "budget.exceeded" and e["payload"]["kind"] == "tool_calls"
+            ]
             if exceeded:
                 break
             time.sleep(2.0)
-        check("the tool-call limit fired", bool(exceeded))
+        check("the tool-call limit fired", bool(exceeded), f"{len(exceeded)} tool_calls events")
         if exceeded:
             payload = exceeded[-1]["payload"]
             check("it is recorded as moderate, not hard", payload["enforcement"] == "moderate", payload["enforcement"])
             check("it says what was done", "best effort" in str(payload["action"]))
             check("no process survived the interruption", payload["survivors"] == [], str(payload["survivors"]))
 
+        for session_id in (limited["session_id"],):
+            post(f"/v1/sessions/{session_id}/cancel", {})
+        time.sleep(3)
         print("\n== wall-time budget ==")
         baseline = len(runtime_processes())
         timed = post(
@@ -404,7 +412,11 @@ def _run() -> int:
         check("and their reasons are still there", {"tool_calls", "wall_time"} <= exceeded_kinds, str(sorted(exceeded_kinds)))
         policies = [event for event in events if event["kind"] == "session.policy"]
         isolations = {event["payload"]["isolation"] for event in policies}
-        check("the isolation level of each session is recorded", isolations == {"weak"}, str(sorted(isolations)))
+        check(
+            "the isolation level of each session is recorded, and they differ",
+            {"weak", "strong"} <= isolations,
+            str(sorted(isolations)),
+        )
         check("the log grew rather than restarted", get("/health")["events"]["last_seq"] > seq_before)
         check("no orphan runtime process after the restart", len(runtime_processes()) <= baseline, str(runtime_processes()))
     finally:

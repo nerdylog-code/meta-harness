@@ -301,6 +301,24 @@ class NamespaceSandboxProvider:
         checks.append(
             EvidenceCheck(name="workspace_writable", ok="WRITABLE" in out, detail=out[:80])
         )
+        # The network is *measured*, not read off the plan. Run14 had a runtime answer while the
+        # policy said the network was closed, and a plan saying "deny" is only a claim about what was
+        # configured -- what matters is whether packets actually leave. Two probes, because either
+        # alone can mislead: an empty routing table inside the namespace, and a real connect attempt.
+        code, out = inside("cat /proc/net/route 2>/dev/null | wc -l")
+        routes = max(int(out.strip()) - 1, 0) if out.strip().isdigit() else 0
+        connect_code, _ = inside(
+            "python3 -c \"import socket;socket.create_connection(('1.1.1.1',443),3)\" 2>/dev/null"
+        )
+        reachable = connect_code == 0 or routes > 0
+        detail = f"routes={routes} connect={'reachable' if connect_code == 0 else 'failed'}"
+        checks.append(
+            EvidenceCheck(
+                name="network_egress_blocked" if plan.network_mode == "deny" else "network_egress_open",
+                ok=(not reachable) if plan.network_mode == "deny" else reachable,
+                detail=detail,
+            )
+        )
         return checks
 
     def cleanup(self, plan: SandboxPlan) -> None:

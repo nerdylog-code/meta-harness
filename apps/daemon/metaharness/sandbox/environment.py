@@ -245,7 +245,12 @@ class ExecutionEnvironment:
 
         is_local = plan.provider == _Local.name
         filesystem = plan.filesystem
+        # Measured, not asserted: the plan's network mode is what was configured; the probe is what
+        # happened. A probe that did not pass downgrades the level rather than being ignored.
         network = plan.network
+        network_probe = next((c for c in checks if c.name.startswith("network_egress_")), None)
+        if network_probe is not None and not network_probe.ok:
+            network = Enforcement.WEAK
         # A boundary that failed its own check is not a boundary.
         # A boundary that failed one of its own containment checks is not a boundary.
         if any(not check.ok for check in checks if check.name.startswith(("forbidden_absent:", "home_file_hidden:"))):
