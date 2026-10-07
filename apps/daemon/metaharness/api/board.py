@@ -165,7 +165,7 @@ def _approvals(store, task_id: str) -> dict[str, Any]:
     }
 
 
-def _enforcement(store, workspace_state: str | None, session_id: str | None) -> dict[str, Any]:
+def enforcement_for(store, workspace_state: str | None, session_id: str | None) -> dict[str, Any]:
     """The two enforcement dimensions, reported separately and never merged.
 
     A worktree isolates concurrent repository writes -- moderate at best -- and says nothing about what
@@ -226,7 +226,7 @@ def _card(store, task: dict[str, Any], deps: dict[str, list[str]], states: dict[
         proof = len(json.loads(task["proof"] or "[]"))
     except (TypeError, ValueError):
         recorded = proof = 0
-    enforcement = _enforcement(store, (workspace or {}).get("state"), (run or {}).get("session_id"))
+    enforcement = enforcement_for(store, (workspace or {}).get("state"), (run or {}).get("session_id"))
     return {
         "task_id": task_id,
         "title": task["title"],
