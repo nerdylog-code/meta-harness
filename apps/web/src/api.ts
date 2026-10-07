@@ -872,3 +872,41 @@ export const renewWorkspaceLease = (taskId: string, run_id: string, generation: 
 
 export const removeTaskWorkspace = (taskId: string) =>
   sendJson<WorkspaceRemoveResult>("DELETE", `/v1/tasks/${encodeURIComponent(taskId)}/workspace`);
+
+// ----------------------------------------------------------------------- canvas
+
+export type CanvasEntityType = "task" | "agent" | "run" | "session" | "workspace" | "approval" | "artifact";
+
+export interface CanvasNode {
+  key: string;
+  entity_type: CanvasEntityType;
+  entity_id: string;
+  label: string;
+  state: string | null;
+  summary: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface CanvasEdge {
+  key: string;
+  kind: string;
+  source: string;
+  target: string;
+  label: string;
+  mutable: boolean;
+}
+
+export interface MissionCanvas {
+  mission_id: string;
+  mission: { id: string; title: string; objective: string | null };
+  nodes: CanvasNode[];
+  edges: CanvasEdge[];
+  waves: Array<{ wave: number; tasks: string[] }>;
+  node_types: CanvasEntityType[];
+  counts: { nodes: number; edges: number; by_type: Partial<Record<CanvasEntityType, number>> };
+  degraded: string[];
+  composed_at: number;
+}
+
+export const fetchMissionCanvas = (missionId: string) =>
+  getArtifactJson<MissionCanvas>(`/v1/missions/${encodeURIComponent(missionId)}/canvas`);

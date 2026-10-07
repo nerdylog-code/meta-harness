@@ -21,6 +21,7 @@ import { MissionOverviewPage } from "./routes/index";
 import { MissionsPage } from "./routes/missions";
 import { MissionPage } from "./routes/mission";
 import { WorkboardPage } from "./routes/workboard";
+import { CanvasPage } from "./routes/canvas";
 import { ApprovalsPage } from "./routes/approvals";
 import { ArtifactRoute } from "./routes/artifact";
 import { SystemPage } from "./routes/system";
@@ -81,6 +82,17 @@ const workboardRoute = createRoute({
   component: MissionWorkboardRoute,
 });
 
+const canvasRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/missions/$missionId/canvas",
+  component: MissionCanvasRoute,
+});
+
+function MissionCanvasRoute() {
+  const { missionId } = canvasRoute.useParams();
+  return <CanvasPage missionId={missionId} />;
+}
+
 function MissionWorkboardRoute() {
   const { missionId } = workboardRoute.useParams();
   return <WorkboardPage missionId={missionId} />;
@@ -137,6 +149,7 @@ const routeTree = rootRoute.addChildren([
   missionsRoute,
   missionRoute,
   workboardRoute,
+  canvasRoute,
   agentsRoute,
   agentRoute,
   eventsRoute,
