@@ -726,6 +726,59 @@ voice:
   provider: null
 ```
 
+## 14.1 BOTS, PROFILES AND HARNESS-BACKED AGENTS
+
+`Bot` is a product/UI term, not a new kernel identity primitive.
+
+The canonical identity remains the Meta-Harness `Agent` (`agt_...`). A Bot can therefore be a
+named presentation/profile of an Agent, while execution may be supplied by any compatible runtime
+or external agent system.
+
+Examples of the product shape include persistent named assistants such as Hermes Bots and other
+vendor-managed bot/agent products. Meta-Harness must not depend on one vendor's implementation of
+that idea.
+
+The separation is:
+
+```text
+Agent identity (Meta-Harness)
+        │
+        ├── AgentVersion / policies / memory / skills / visual identity
+        │
+        └── execution binding
+              ├── Pi
+              ├── Hermes
+              ├── OpenClaw
+              ├── OMP
+              ├── future local harness
+              └── external managed bot/agent service
+```
+
+An external harness is allowed to be the execution body of one of our Agents.
+
+Integration rules:
+
+1. If Meta-Harness can create/control sessions and observe structured events, integrate it as a
+   `RuntimeAdapter`.
+2. If the external system only exposes messaging to a pre-existing bot, integrate that surface as a
+   `ChannelProvider` bridge rather than pretending Meta-Harness owns its execution lifecycle.
+3. If the external system exposes a delegated job/workflow rather than an interactive runtime,
+   integrate it as a `WorkflowProvider`.
+4. Do not create a second canonical Agent identity just because the external harness has its own
+   bot/profile identifier. Store the foreign identifier as runtime/provider metadata linked to the
+   AgentVersion or Session.
+5. Capability and enforcement claims remain truthful. An external bot that does not expose cancel,
+   approvals, usage, sandboxing or tool events must report those capabilities as unsupported or
+   externally enforced.
+6. Importing or attaching an existing external Bot never grants it more authority than the local
+   Meta-Harness policies allow.
+7. Runtime migration remains valid: the same `agt_` identity may move from a Hermes Bot/profile to
+   Pi, OpenClaw, OMP or another future harness when the necessary state can be represented through
+   the Context Capsule and adapter contract.
+
+This means Meta-Harness can offer a Bots/Workers roster similar in feel to modern named-agent
+products without turning "Bot" into a vendor-specific kernel concept.
+
 ---
 
 # 15. RUNTIME ADAPTER CONTRACT
@@ -1143,13 +1196,219 @@ Card metadata:
 
 # 31. CANVAS
 
-Visual projection/editor of the Work Graph.
+The Canvas is an **infinite operational canvas** for the Work Graph.
 
-Live activity represents real events.
+It is both a visual projection and a constrained editor, but it is never an independent source of
+truth. Every meaningful mutation is validated by the daemon and becomes canonical events/state.
 
-Removing an edge changes future routing or permissions at a safe boundary.
+Core node types:
 
-Canvas is not an independent source of truth.
+```text
+Task
+Agent
+Session / Run
+Approval
+Artifact
+Workspace
+Human checkpoint
+Integration / Tool
+Workflow
+Note / Specification
+```
+
+Core edge meanings include:
+
+```text
+depends_on
+assigned_to
+produces
+consumes
+requires_approval
+runs_in
+continues_from
+reviews
+triggers
+permission
+```
+
+A Task node can expose operational checklists without creating a second task system:
+
+```text
+Setup
+☑ workspace prepared
+☑ dependencies installed
+☐ dev server ready
+
+Acceptance
+☑ tests pass
+☐ screenshot reviewed
+☐ human approval granted
+
+Artifacts
+• diff
+• screenshot
+• report
+```
+
+These checklists project canonical Task acceptance criteria, proof, Artifacts and Approval state.
+
+## 31.1 LIVE WORKSPACE
+
+The Canvas may open a live workspace surface for a Task or Run:
+
+```text
+Preview | Files | Terminal | Diff | Logs | Activity
+```
+
+The preview is the application actually being built or operated, not a mock image. The user can
+watch an Agent modify the workspace while the preview, diff, logs and task state update from real
+events.
+
+The implementation may use a browser/iframe or another renderer where appropriate, but preview
+technology is not the source of truth and is not a security boundary.
+
+## 31.2 HUMAN ↔ AGENT TAKEOVER
+
+Human and Agent must not write the same workspace concurrently.
+
+The existing single-writer invariant applies to interactive collaboration through a WriterLease:
+
+```text
+AGENT owns writer lease
+        ↓ Take control
+Agent pauses / reaches safe boundary
+        ↓
+HUMAN owns writer lease
+        ↓ Hand back
+Human releases lease
+        ↓
+Agent receives updated task/workspace context
+        ↓
+AGENT resumes
+```
+
+Required control events should include:
+
+```text
+control.requested
+control.granted
+control.transferred
+control.released
+control.resumed
+```
+
+A takeover must preserve the current Task, Run, workspace, diff, relevant Artifacts and acceptance
+state. Hand-back may create or refresh a Context Capsule when the operational state changed enough
+to require one.
+
+The product goal is collaborative building: the Agent can work on the actual application while the
+human watches, tests the same live surface, temporarily takes control, makes or requests a change,
+and hands the workspace back without starting a new unrelated chat/session.
+
+## 31.3 ELEMENT-LEVEL FEEDBACK
+
+When a live web preview is available, the user may select an element and send precise context to the
+active Agent.
+
+The handoff may contain:
+
+```text
+DOM selector / stable element identity
+component or source-file hint when known
+bounding box / screenshot region
+current route
+console errors
+current Task / Run
+current diff summary
+human instruction
+```
+
+Element selection is contextual assistance only. It must not bypass workspace policy, approvals,
+sandboxing or the writer lease.
+
+## 31.4 AGENT-DRIVEN CANVAS EDITING
+
+Agents may propose changes to the Work Graph, for example:
+
+```text
+create Task
+add dependency
+assign Agent
+request Approval
+attach Artifact
+create Human checkpoint
+```
+
+They do not mutate the Canvas database directly.
+
+The flow is:
+
+```text
+Agent
+→ ActionProposal / typed graph command
+→ daemon validation
+→ approval when required
+→ canonical event/state mutation
+→ Canvas projection updates
+```
+
+This lets an Architect Agent visually decompose a Mission while preserving deterministic graph
+rules and human authority.
+
+## 31.5 TIME TRAVEL
+
+Because the event log is append-only, the Canvas should support historical reconstruction.
+
+A timeline slider can render the Mission/Work Graph as it existed at a selected canonical sequence
+number. Historical mode is read-only by default.
+
+This allows the user to answer questions such as:
+
+- What did the Mission look like before a redesign?
+- Which Agent owned a Task when a failure happened?
+- Which Approval unlocked an action?
+- Which Artifact existed at that point?
+- How did the workflow evolve?
+
+## 31.6 CANVAS DELIVERY STAGES
+
+Canvas V1:
+
+```text
+pan / zoom / minimap
+Task + Agent + Approval + Artifact nodes
+typed Work Graph edges
+live task state
+Inspector
+basic graph editing through daemon commands
+```
+
+Canvas V2:
+
+```text
+Live Workspace
+Preview / Files / Terminal / Diff / Logs
+element-level feedback
+Pause / Take control / Hand back
+WriterLease integration
+live Agent activity
+```
+
+Canvas V3:
+
+```text
+time travel
+multi-agent swimlanes
+richer workflow composition
+runtime migration visualization
+collaborative human/agent presence
+```
+
+Canvas remains runtime-neutral: Nova/Pi, Atlas/Hermes, Echo/OpenClaw, Iris/OMP and a human operator
+must all be representable on the same Mission surface.
+
+Live activity represents real events. Removing or creating an edge changes future routing,
+dependencies or permissions only after the daemon accepts the mutation at a safe boundary.
 
 ---
 
@@ -2069,11 +2328,18 @@ Operational visibility.
 
 ## PHASE 10 — Canvas
 
+Build the infinite operational Canvas over the canonical Work Graph.
+
 Gate:
-visual Architect → Builder → Reviewer flow executes.
+visual Architect → Builder → Reviewer flow executes using canonical Tasks, Approvals and Artifacts;
+a live Task workspace can be observed without creating a second source of truth.
 
 Expected:
-Visual orchestration.
+Visual orchestration with a path to Live Workspace and human ↔ Agent takeover.
+
+The initial Canvas does not require the full collaborative takeover surface to ship. Canvas V1 is
+the graph/editor projection; Live Workspace + WriterLease takeover follows once Worktrees,
+Approvals and Artifact inspection are stable.
 
 ## PHASE 11 — Hermes Adapter
 
@@ -2723,19 +2989,21 @@ Show:
 4. Four runtimes.
 5. Architect creates DAG.
 6. Builders receive worktrees.
-7. Canvas animates.
-8. Workboard updates.
+7. Canvas animates and shows the canonical Work Graph.
+8. Human opens a live workspace, briefly takes control from an Agent, tests/changes the same
+   application surface, and hands the writer lease back.
+10. Workboard updates.
 9. One agent reaches pressure.
-10. Capsule generated.
-11. Context compacts.
-12. Agent continues.
-13. Reviewer blocks.
-14. Builder fixes.
-15. Usage compared.
-16. Ask explains.
-17. WhatsApp interacts.
-18. Voice interacts.
-19. Mission completes with proof.
+11. Capsule generated.
+12. Context compacts.
+13. Agent continues.
+14. Reviewer blocks.
+15. Builder fixes.
+16. Usage compared.
+17. Ask explains.
+18. WhatsApp interacts.
+19. Voice interacts.
+20. Mission completes with proof.
 
 ---
 
