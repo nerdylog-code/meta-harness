@@ -19,7 +19,10 @@ process, and a daemon restart after which Nova, the mission, the session history
 are still there. `scripts/e2e_m1.py` is that proof, run by hand because it needs the binary, a
 provider and real credit.
 
-**M3 — Execution Boundary — is implemented and proven against the real runtime on Linux.** The
+**S1 — Execution Boundary — is complete and proven against the real runtime on Linux.** It is a
+security gate, not the Book's M3: **M3 in `PROJECT_BOOK.md` §77 is Multi-Runtime Team**, which stays
+ahead. This gate was reached first because the M2 run proved an agent could leave its workspace, and
+no amount of team-building is safe before the control plane can refuse. The
 `RequestedPolicy`/`EffectivePolicy`/`EnforcementEvidence` split (ADR-0019), the five canonical
 budgets, and the `RuntimeAdapter → ExecutionEnvironment → SandboxProvider → ProcessSupervisor`
 chain exist, and the first strong proof is Hermes: a real `hermes acp` session runs inside a
@@ -55,8 +58,8 @@ nothing today bounds what a migrated agent may execute. The handoff rendering no
 acknowledgement instead of open work, which is the right ask for a transfer -- but a scratch
 directory is not a sandbox, and the script says so.
 
-**308 tests green locally** across 8 suites (v1 21, unit 34, contracts 113, store 57, integration
-17, replay 21, conformance 34, desktop 11) and the CI matrix is green on `ubuntu-latest` and
+**354 tests green locally** across 8 suites (v1 21, unit 34, contracts 113, store 57, integration
+63, replay 21, conformance 34, desktop 11) and the CI matrix is green on `ubuntu-latest` and
 `windows-latest`. `master` and the tag `v0.1-hermes-hosted` are untouched.
 
 | WP | State |
@@ -91,28 +94,39 @@ directory is not a sandbox, and the script says so.
 - **Scripts**: `python scripts/dev.py | test.py | doctor.py | package.py` — no Bash, no `shell=True`, works from PowerShell and POSIX.
 - **Canonical store** `apps/daemon/metaharness/store` (WP-004): SQLite WAL, three numbered migrations, `BEGIN IMMEDIATE` per append, `seq` assigned inside the transaction and gap-free, append-only enforced by triggers, idempotent by event id, content-addressed artifacts with no blob column, JSONL export that is derived only. One call proves replay: `uv run python -c "import asyncio, metaharness.store as s; print(asyncio.run(s.replay_equivalence_check()))"`.
 - **Boot reconciliation** `apps/daemon/metaharness/reconcile`: reads persisted state, asks a `ProcessProbe`, appends `run.interrupted` with `orphaned=true`, and never resumes work. Deliberately outside the store.
-- **Tests**: v1 regression 21/21 · unit 34/34 · contracts 113/113 · store 57/57 · integration 17/17 · replay 21/21 · **conformance 18/18 (1 skip, by design)** — 281 measured by `scripts/test.py`, which is the only number to trust: earlier notes in this file quoted a total that was never counted, and this one was read off the runner's own output. The suites exercise a real server, real websockets, real process trees and real hard kills; the whole default run is ~2 min.
+- **Execution boundary (S1)**: `packages/contracts/metaharness_contracts/policy.py` and
+  `apps/daemon/metaharness/{budget.py,sandbox/}`; three providers (container → namespace → none) that
+  say why they are unavailable, five canonical budgets with per-dimension enforcement levels, and
+  `tests/integration/sandbox/test_execution_boundary.py` (9 tests, 1 skip where no strong provider
+  exists). `scripts/e2e_m3.py` exits 0 with 31 checks against the real runtime.
+- **Tests**: v1 regression 21/21 · unit 34/34 · contracts 113/113 · store 57/57 · integration 63/63 (includes the 9 execution-boundary tests) · replay 21/21 · conformance 34/34 (2 skips, by design) · desktop 11/11 — **354 measured by `scripts/test.py`**, which is the only number to trust: earlier notes in this file quoted a total that was never counted, and this one was read off the runner's own output. The suites exercise a real server, real websockets, real process trees and real hard kills; the whole default run is ~2 min.
 - **ProcessSupervisor** `apps/daemon/metaharness/process`: one interface, two OS implementations, pre-signal tree snapshot, verified kill (`orphan_check` inside the emitted event), bounded streams, wall-timeout budget. Design and the orphan bug it fixed: `docs/architecture/PROCESS_SUPERVISION.md`.
 - **Web shell** `apps/web` (WP-006): Vite + React + TS + TanStack Query + TanStack Router (code-based routes), one websocket owned by a context provider, connection state that distinguishes live from degraded from connecting, an event inspector that always says whether it is showing the live socket or the durable backlog, and a sidebar that marks unbuilt surfaces as `soon` instead of linking to nowhere. Built bundle is served by the daemon with an SPA fallback; deep links work and path traversal is refused (403, verified with `curl --path-as-is`). DOM verified in headless Chromium: the shell renders, the badge reads `live`, and the log's events appear.
 - **CI** `.github/workflows/ci.yml`: matrix `ubuntu-latest` + `windows-latest`, seven suites (v1, unit, contracts, store, integration, replay, conformance), plus a web job gated on `apps/web/package.json`.
 
 ## Not yet built (explicitly)
 
-No context engine, no plugin kernel, no secrets broker, no channels, no voice, no RAG, no Tauri
-shell, no auth token enforcement (the enforced property today is **loopback-only**), no approvals
-table, no tasks table. The Pi adapter is the only runtime; Hermes/OpenClaw/OMP are adapters on
-paper (ADR-0006) and nothing more.
+No context engine, no plugin kernel, no secrets broker, no channels, no voice, no RAG, no auth
+token enforcement (the enforced property today is **loopback-only**), no approvals table, no tasks
+table, no worktree allocator.
+
+**Runtimes:** Pi (`pi --mode rpc`) and **Hermes (`hermes acp`)** are implemented adapters with
+conformance suites (ADR-0006, ADR-0016, `docs/protocols/`). OpenClaw and OMP are still adapters on
+paper. The desktop shell exists: a window plus a Python host (ADR-0009,
+`docs/architecture/PACKAGING.md`).
 
 ## Next
 
-**M3 — Execution Boundary** (the current one; M2 is below for reference). The point is that the
-control plane can **refuse**, not only ask: an agent may stay autonomous but may not leave the
-space, time and budget it was granted. Done: ADR-0019, the policy records, the budgets with honest
-enforcement levels, the three sandbox providers, the boundary test suite, and the real Hermes
-session inside a strong sandbox. Next in the sequence, in this order: **Tasks / Work Graph →
-Approvals → Artifact inspection → Worktree allocator → richer Canvas/Workboard → Fusion/Swarm.**
-Swarm does not come before enforcement: an agent with no boundary already started another E2E by
-itself, and multiplying that before the cage exists would be an architectural error.
+**Tasks / Work Graph** (the current one). A Mission stops being a grouping and gains a canonical
+work graph: tasks with dependencies, states, acceptance criteria and evidence, where a Run executes
+a Task and a Task is not a Session. The core lands in the daemon first (events, projection, API) and
+the UI is a projection of it. Order after that: **Approvals → Artifact Inspector → Worktree
+Allocator → Workboard → Canvas.**
+
+**S2 — Selective Egress + Control Plane Auth** is registered as the next security gate, before
+Swarm/Factory, and deliberately not built yet: the S1 run showed an agent with an open network
+reaching the control plane's own unauthenticated API. **Swarm stays forbidden** until the Work
+Graph, worktrees, approvals and S2 exist.
 
 **M2 — Runtime Migration** (done). The point was proving that Nova survives a change of body.
 `Nova/Pi → verified Context Capsule → Nova/Hermes`, same `agt_` identity, same mission, the Pi
@@ -168,14 +182,17 @@ git log --oneline --decorate -6
   the policy engine, the budget engine and the lifecycle stay green there. The container provider
   reports `unavailable` with the reason when no daemon is reachable (`the daemon is not reachable at
   /var/run/docker.sock`) — it is not silently skipped.
-- **The network is the weak dimension of the boundary, and the M3 run showed what that costs.** With
+- **The network is the weak dimension of the boundary, and the S1 run showed what that costs.** With
   `network: unrestricted` a sandboxed agent shares the host's loopback: it port-scanned, found the
   daemon's own `/v1/...` API and read another session's transcript (which is where the run's canary
   token was). The filesystem stayed strong — the repository was absent inside and the canary file
   unreadable — and `isolation: weak` was recorded for exactly this reason, so the record was right
-  while the claim "the agent cannot leave" was not. With `network: restricted` nothing is reachable,
-  including the runtime's own model provider, so the runtime cannot answer. Egress filtering with
-  the provider allowlisted is the fix; it is not built, and the API has no authentication either.
+  while the claim "the agent cannot leave" was not. With `network: restricted` the namespace has no egress — measured inside it, not
+  read off the plan (`routes=0 connect=failed`) — so `network` and `isolation` are honestly `strong`,
+  but **the runtime cannot reach a remote provider either**, which is the trade S2 has to remove.
+  **Selective egress is not implemented** (no allowlisted proxy, no namespace egress rules), and
+  **the control plane's API still has no authentication**: on an open network what an agent can
+  reach includes the daemon itself.
 - **A sandboxed runtime's credential is passed in its environment**, which puts it in the sandbox's
   argv: visible to the same user's processes. On a single-user desktop that is the same trust
   domain, and the runtime's own credentials file (`~/.hermes/.env`, staged 0600) is the mechanism
