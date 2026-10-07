@@ -126,7 +126,15 @@ class WorkspaceTest(unittest.TestCase):
         task = self.task("A")
         self.allocate(task)
         listed = git("worktree", "list", "--porcelain", cwd=self.repo).stdout
-        self.assertIn(str(self.workspace_path(task)), listed)
+        # Git prints worktree paths with forward slashes in porcelain output on every platform, so
+        # the comparison is made between resolved canonical paths (Architect, cross-platform
+        # contract) rather than between two spellings of the same directory.
+        listed_paths = {
+            str(Path(line.removeprefix("worktree ").strip()).resolve())
+            for line in listed.splitlines()
+            if line.startswith("worktree ")
+        }
+        self.assertIn(str(self.workspace_path(task).resolve()), listed_paths)
         branches = git("branch", "--list", "--format=%(refname:short)", cwd=self.repo).stdout
         self.assertIn(f"mh/task/{task}", branches)
 

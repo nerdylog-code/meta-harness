@@ -133,6 +133,30 @@ directory is not a sandbox, and the script says so.
 | WP-020 — Runtime events UI | **done, folded into the agent page** — usage with per-metric provenance, bounded tool previews, and settled/open/cancelled shown as three different states |
 | WP-007 — Tauri shell | **done** — a window plus a Python host that owns the daemon through WP-005's supervisor; A2/A3/A5/A6 run in CI with no Rust, A1/A3 proven by `apps/desktop/smoke_shell.py` against a real window, A7 produced an AppImage (97 MiB) and a deb (1.33 MiB) here; Windows bundle **not** verified (no Windows host involved). Logic and decisions: ADR-0009, `docs/architecture/PACKAGING.md` |
 
+**Worktree Allocator + Writer Lease — complete.** A task can now receive an isolated Git worktree
+and exactly one run may write to it at a time. The two dimensions stay separate on purpose: a
+worktree is **concurrency and write isolation** (reported as `moderate`, and only about concurrent
+repository mutation) and it is **not** a security boundary — `filesystem_isolation` still comes from
+the sandbox (S1) and reads `unknown` here, and a test asserts that a worktree never upgrades it.
+There is one Workspace API and one canonical record (`workspace.*` events → the `workspaces` and
+`workspace_leases` projections). No new public id prefix was introduced: an allocation is identified
+by `(task_id, repository common dir)` and a lease by that allocation plus a monotonically increasing
+**generation**, so the frozen id namespace stays frozen.
+
+Git runs as **argv**, never through a shell — no `shell=True`, no command strings, no bash
+dependency — which is what makes it work on Windows and POSIX and what keeps a path containing a
+space from becoming two arguments. The tests use real repositories and real worktrees whose paths
+contain spaces. The rules are refusals, not best-effort: the repository is validated by Git rather
+than by the caller's word; the destination is **derived** from the task id under the data root, so a
+client never chooses where a worktree goes; allocation is **idempotent** per task and repository and
+something else at the destination is refused rather than deleted; a lease is granted only when
+nobody holds a live one, and released only by its holder **at the current generation**, so a stale
+owner cannot release a newer writer's lease; removal requires no active lease, a clean worktree and
+matching metadata, never uses `--force`, and **keeps the branch** because work is never discarded
+automatically. Boot reconciliation settles leases for real now — an expired lease is expired and a
+lease whose run is no longer alive is released explicitly, each as an event — so `leases_released` is
+a measured number instead of the placeholder zero it used to be.
+
 ## Working (verified in this checkout)
 
 - **Daemon** `apps/daemon/metaharness`: `GET /health`, `GET /version`, `GET /v1/events`, `WS /v1/events/ws` (+ `/events/ws` alias), loopback-only guard, optional static mount of the web bundle.
@@ -188,13 +212,15 @@ paper. The desktop shell exists: a window plus a Python host (ADR-0009,
 
 ## Next
 
-**Worktree Allocator** (the current one). The order the Architect set: **Approvals → Artifact
-Inspector → Worktree Allocator → Workboard → Canvas.** Work, authority and evidence exist; what does
-not exist yet is the allocator that gives a task an isolated working copy with a single writer, so
-two runs cannot fight over one workspace (BOOK §26/§28). **Live Workspace / takeover does not start
-before WriterLease and worktrees exist**, and **S2 — selective egress + control plane auth** stays
-registered before Swarm, because it is also what makes the approver's identity and per-task artifact
-access verifiable.
+**Workboard** (the current one). The order the Architect set: **Approvals → Artifact Inspector →
+Worktree Allocator → Workboard → Canvas V1 → Live Workspace plumbing → Human ↔ Agent takeover.**
+Work, authority, evidence and now isolated working copies with a single writer exist. What comes next
+is the board that shows all of it at once: tasks by state, their waves, their workspace and who holds
+the lease, and what is blocked on what. The lease was designed so that takeover can be built on top of
+it — release generation N, then an authenticated actor acquires N+1 — but **Take control / Hand back
+does not start before S2 gives actors an identity**, and **S2 — selective egress + control plane auth**
+stays registered before Swarm, because it is also what makes the approver's identity and per-task
+artifact access verifiable.
 
 **S2 — Selective Egress + Control Plane Auth** is registered as the next security gate, before
 Swarm/Factory, and deliberately not built yet: the S1 run showed an agent with an open network
@@ -249,6 +275,20 @@ git log --oneline --decorate -6
 
 ## Honest limitations
 
+- **A worktree is not a sandbox, and the UI must never suggest otherwise.** The workspace panel
+  shows `write_isolation` (moderate, about concurrent repository mutation) and `filesystem_isolation`
+  (the sandbox's dimension, `unknown` here) as two separately labelled lines. An unrestricted runtime
+  inside a worktree can still read other host directories, reach the network and call the control
+  plane's own API — exactly what the S1 run demonstrated. There is no "strong sandbox" badge because
+  a worktree exists.
+- **The workspace API has no actor authentication**, the same S2 trust limitation the rest of the
+  control plane has. The lease is a correctness mechanism for concurrent writers, not an
+  authorisation mechanism for humans: "who is asking" is unverified, so a `run_id` in a request body
+  is a claim, not a proven identity. Human takeover will transfer a lease only after S2 gives actors
+  an identity.
+- **Removal refuses rather than forces.** A dirty worktree, an active lease, a missing directory and
+  a directory Git does not list as a worktree of that repository are all 409s. There is no `--force`
+  path and no automatic branch deletion or merge: integration is a later controlled action.
 - The v2 suites run locally on Python 3.12; the v1 suite also passes under the Hermes venv interpreter (3.13). A bare 3.14 without PyYAML fails the v1 suite, which `scripts/test.py` now diagnoses with the interpreter path and the exact command to use.
 - **The strong sandbox is verified on Linux only.** The boundary tests use bubblewrap; on Windows
   CI they skip with the exact reason (`strong sandbox real not verified here`), while the contracts,
