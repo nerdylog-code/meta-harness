@@ -108,6 +108,25 @@ class BoundaryTest(unittest.TestCase):
                 self.assertTrue(check.ok, check.detail)
 
 
+    def test_a0_a_provider_whose_probe_misbehaves_reports_unavailable(self) -> None:
+        """A probe that hangs or cannot run is an `unavailable` verdict, never a raised exception.
+
+        This is the Windows CI finding: `docker` was installed, its daemon never answered, and the
+        probe raised `TimeoutExpired` instead of reporting -- which failed the whole suite. The
+        provider degrades to the next one and says why.
+        """
+        from metaharness.sandbox.provider import ContainerSandboxProvider
+
+        hanging = ContainerSandboxProvider(runtime=sys.executable, probe_timeout_s=0.001)
+        verdict = hanging.available()
+        self.assertFalse(verdict.ok, "a probe that does not answer is not available")
+        self.assertTrue(verdict.detail.strip(), "and it says why, rather than reporting nothing")
+        self.assertTrue(
+            "did not answer" in verdict.detail or "not reachable" in verdict.detail,
+            verdict.detail,
+        )
+
+
 class BudgetTest(unittest.TestCase):
     """Budgets: a real runtime inside a real sandbox, with limits that actually fire."""
 

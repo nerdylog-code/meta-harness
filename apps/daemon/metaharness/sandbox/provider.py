@@ -339,16 +339,36 @@ class ContainerSandboxProvider:
 
     name = "container"
 
-    def __init__(self, *, runtime: str = "docker", image: str = "python:3.12-slim") -> None:
+    def __init__(
+        self, *, runtime: str = "docker", image: str = "python:3.12-slim", probe_timeout_s: float = 10.0
+    ) -> None:
         self.runtime = runtime if shutil.which(runtime) else ""
         self.image = image
+        # A daemon that is unreachable must not stall the product: the probe is bounded, and a
+        # bounded probe that does not answer is an `unavailable` verdict rather than a delay.
+        self.probe_timeout_s = probe_timeout_s
 
     def available(self) -> Availability:
         if not self.runtime:
             return Availability(False, "docker/podman is not installed")
-        probe = subprocess.run(
-            [self.runtime, "info", "--format", "{{.ServerVersion}}"], capture_output=True, text=True, timeout=30
-        )
+        try:
+            probe = subprocess.run(
+                [self.runtime, "info", "--format", "{{.ServerVersion}}"],
+                capture_output=True,
+                text=True,
+                timeout=self.probe_timeout_s,
+            )
+        except subprocess.TimeoutExpired:
+            # Measured on the Windows runner: `docker` exists, its daemon never answers, and the
+            # probe used to raise instead of reporting. An unavailable provider says why and lets the
+            # next one be chosen -- it never fails the suite (BOOK 82: never fake green, never block).
+            return Availability(
+                False,
+                f"{self.runtime} did not answer within {self.probe_timeout_s:g}s; treating its daemon "
+                "as unreachable",
+            )
+        except OSError as exc:
+            return Availability(False, f"{self.runtime} could not be executed: {exc}")
         if probe.returncode != 0:
             reason = (probe.stderr or probe.stdout).strip().splitlines()
             return Availability(

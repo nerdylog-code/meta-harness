@@ -32,6 +32,7 @@ import {
   startTask,
 } from "../api";
 import { EmptyState, Failure, KeyValues, Loading, Panel } from "../components/Panel";
+import { WorkspacePanel } from "../components/WorkspacePanel";
 
 //: Every state the daemon can put a task in, in the order work flows through them. The UI
 //: renders the exact word and never folds two of them together.
@@ -680,6 +681,9 @@ export function MissionPage({ missionId }: { missionId: string }) {
               </table>
             )}
           </Panel>
+          <div className="workspace-panels">
+            {tasks.map((task) => <WorkspacePanel key={task.id} taskId={task.id} />)}
+          </div>
         </>
       ) : null}
     </>

@@ -680,3 +680,107 @@ export async function fetchArtifactContent(
   }
   return response;
 }
+
+// -------------------------------------------------------------- task workspaces
+
+export interface WorkspaceWriter {
+  run_id: string;
+  generation: number;
+  acquired_at: number;
+  heartbeat_at: number;
+  expires_at: number;
+  state: string;
+  expired: boolean;
+  active: boolean;
+}
+
+export interface WorkspaceEnforcement {
+  write_isolation: string;
+  write_isolation_scope: string;
+  write_isolation_detail: string | null;
+  filesystem_isolation: string;
+  filesystem_isolation_scope: string;
+  note: string | null;
+}
+
+export interface Workspace {
+  task_id: string;
+  mission_id: string;
+  provider: string;
+  repository: { root: string; common_dir: string };
+  base_ref: string;
+  base_commit: string;
+  branch: string;
+  locator: string;
+  state: "ready" | "allocating" | "missing" | "conflict" | "removed" | "failed" | string;
+  recorded_state: string;
+  dirty: boolean | null;
+  measured: boolean;
+  note: string | null;
+  created_at: number;
+  writer: WorkspaceWriter | null;
+  enforcement: WorkspaceEnforcement;
+}
+
+export interface WorkspaceLeaseResult {
+  verdict: "grant" | "renew";
+  reason: string;
+  writer: WorkspaceWriter;
+}
+
+export interface WorkspaceLeaseReleaseResult {
+  released: boolean;
+  writer: WorkspaceWriter | null;
+}
+
+export interface WorkspaceLeaseRenewResult {
+  renewed: boolean;
+  writer: WorkspaceWriter;
+}
+
+export interface WorkspaceRemoveResult {
+  removed: boolean;
+  task_id: string;
+  branch: string;
+  branch_kept: boolean;
+}
+
+export const fetchTaskWorkspace = async (taskId: string): Promise<Workspace | null> => {
+  const path = `/v1/tasks/${encodeURIComponent(taskId)}/workspace`;
+  try {
+    return await getArtifactJson<Workspace>(path);
+  } catch (error) {
+    if (error instanceof ApiRefusal && error.status === 404) return null;
+    throw error;
+  }
+};
+
+export const fetchWorkspaces = () =>
+  getArtifactJson<{ workspaces: Workspace[]; count: number }>("/v1/workspaces");
+
+export const allocateWorkspace = (taskId: string, repository: string, base_ref = "HEAD") =>
+  sendJson<Workspace>("POST", `/v1/tasks/${encodeURIComponent(taskId)}/workspace/allocate`, {
+    repository,
+    base_ref,
+  });
+
+export const acquireWorkspaceLease = (taskId: string, run_id: string, ttl_s?: number) =>
+  sendJson<WorkspaceLeaseResult>("POST", `/v1/tasks/${encodeURIComponent(taskId)}/workspace/lease/acquire`, {
+    run_id,
+    ...(ttl_s === undefined ? {} : { ttl_s }),
+  });
+
+export const releaseWorkspaceLease = (taskId: string, run_id: string, generation: number) =>
+  sendJson<WorkspaceLeaseReleaseResult>("POST", `/v1/tasks/${encodeURIComponent(taskId)}/workspace/lease/release`, {
+    run_id,
+    generation,
+  });
+
+export const renewWorkspaceLease = (taskId: string, run_id: string, generation: number) =>
+  sendJson<WorkspaceLeaseRenewResult>("POST", `/v1/tasks/${encodeURIComponent(taskId)}/workspace/lease/renew`, {
+    run_id,
+    generation,
+  });
+
+export const removeTaskWorkspace = (taskId: string) =>
+  sendJson<WorkspaceRemoveResult>("DELETE", `/v1/tasks/${encodeURIComponent(taskId)}/workspace`);
