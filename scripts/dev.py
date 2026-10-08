@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import json
+import secrets
 import socket
 import sys
 import threading
@@ -108,9 +110,12 @@ def main(argv: list[str] | None = None) -> int:
         port=port,
         data_dir=args.data_dir,
         serve_web=not args.no_web,
+        read_bootstrap_stdin=True,
     )
     app = create_app(settings)
     url = f"http://{args.host}:{port}"
+    capability = secrets.token_urlsafe(32)
+    bootstrap_record = json.dumps({"type": "bootstrap", "capability": capability}, separators=(",", ":")).encode("utf-8") + b"\n"
 
     print(f"[dev] meta-harness v2 skeleton")
     print(f"[dev] data root : {settings.resolved_data_dir()}")
@@ -120,7 +125,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[dev] events ws : ws://{args.host}:{port}/v1/events/ws")
 
     if not args.no_browser:
-        open_when_ready(url, args.host, port)
+        open_when_ready(f"{url}/auth/bootstrap?capability={capability}", args.host, port)
+    print(f"[dev] one-use bootstrap URL: {url}/auth/bootstrap?capability={capability}")
 
     if args.reload:
         uvicorn.run(
@@ -132,7 +138,14 @@ def main(argv: list[str] | None = None) -> int:
             reload_dirs=[str(DAEMON_DIR)],
         )
     else:
-        uvicorn.run(app, host=args.host, port=port, log_level="info")
+        # The launcher is the trusted parent: supply exactly one record on the private stdin pipe.
+        import io
+        original_stdin = sys.stdin
+        sys.stdin = io.TextIOWrapper(io.BytesIO(bootstrap_record))
+        try:
+            uvicorn.run(app, host=args.host, port=port, log_level="info")
+        finally:
+            sys.stdin = original_stdin
     return 0
 
 

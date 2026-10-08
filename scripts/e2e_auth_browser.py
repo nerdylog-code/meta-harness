@@ -14,6 +14,7 @@ Run by hand: `uv run python scripts/e2e_auth_browser.py`
 from __future__ import annotations
 
 import json
+import secrets
 import socket
 import sys
 import tempfile
@@ -71,13 +72,21 @@ def raw(port: int, path: str, *, cookie: str | None = None, follow: bool = False
         return exc.code, exc.read(), exc.headers
 
 
-def bootstrap_path(data_root: Path, port: int) -> str:
-    absolute = (data_root / "bootstrap.url").read_text(encoding="utf-8").strip()
-    return absolute[len(f"http://127.0.0.1:{port}") :]
+def mint_capability(app) -> str:
+    """Mint a capability as a trusted parent does and feed it through the daemon's real ingest.
+
+    There is no file: mode 0600 protects against another OS user, not against another process under
+    the same account, so the credential never touches the filesystem.
+    """
+    capability = secrets.token_urlsafe(32)
+    record = json.dumps({"type": "bootstrap", "capability": capability}).encode()
+    if not ingest_bootstrap_line(app, record):
+        raise AssertionError("the daemon refused a well-formed bootstrap record")
+    return f"/auth/bootstrap?capability={capability}"
 
 
 def main() -> int:
-    from metaharness.app import Settings, create_app
+    from metaharness.app import Settings, create_app, ingest_bootstrap_line
 
     workdir = Path(tempfile.mkdtemp(prefix="auth-browser-"))
     data_root = workdir / "data"
@@ -122,8 +131,8 @@ def main() -> int:
         text = refused.text()
         check("evt_" not in text and "payload" not in text, "and it returns no event history")
 
-        check((data_root / "bootstrap.url").exists(), "the daemon minted a bootstrap capability")
-        path = bootstrap_path(data_root, port)
+        path = mint_capability(app)
+        check(path.startswith("/auth/bootstrap?capability="), "a trusted parent can hand the daemon a capability")
 
         # ---------------------------------------------------------- the operator's bootstrap
         page.goto(f"{origin}{path}", wait_until="networkidle")
@@ -142,7 +151,7 @@ def main() -> int:
             not any(marker in session_value for marker in ("operator", "agent", "agt_", "run_", "Daniel")),
             "and its content is opaque",
         )
-        check(not (data_root / "bootstrap.url").exists(), "and the capability file was consumed")
+        check(not any(data_root.rglob("bootstrap*")), "and nothing bootstrap-shaped exists on disk")
 
         # ---------------------------------------------------------- the session works
         session_call = page.request.get(f"{origin}/v1/session")
@@ -250,7 +259,7 @@ def main() -> int:
             time.sleep(0.1)
     stale_status, _, _ = raw(restarted_port, "/v1/events", cookie=f"mh_session={session_value}")
     check(stale_status == 401, "after a restart the old session is refused", str(stale_status))
-    _, _, headers = raw(restarted_port, bootstrap_path(data_root, restarted_port))
+    _, _, headers = raw(restarted_port, mint_capability(restarted))
     fresh = (headers.get("Set-Cookie") or "").split(";")[0]
     status, body, _ = raw(restarted_port, "/v1/missions", cookie=fresh, follow=True)
     ids = [item.get("mission_id") or item.get("id") for item in json.loads(body or b"{}").get("missions", [])]

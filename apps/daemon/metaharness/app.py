@@ -26,6 +26,9 @@ records that gap rather than implying an auth story the skeleton does not have.
 from __future__ import annotations
 
 import asyncio
+import logging
+import sys
+import threading
 import time
 from collections.abc import Collection
 from contextlib import asynccontextmanager
@@ -53,12 +56,14 @@ from .sandbox import ExecutionEnvironment
 from .runtimes.hermes.adapter import HermesRuntimeAdapter
 from .runtimes.pi.adapter import PiRuntimeAdapter
 from .auth import (
+    BOOTSTRAP_RECORD_LIMIT,
     COOKIE_NAME,
     ActorContext,
     AuthMiddleware,
     AuthRegistry,
     SYSTEM_ACTOR,
     actor_from_request,
+    bootstrap_record,
 )
 from .store import Store, default_db_path
 from .version import VERSION, git_sha, runtime_info
@@ -85,6 +90,11 @@ class Settings:
     sandbox: str = "auto"
     #: The container runtime to look for when ``auto`` reaches the container rung.
     container_runtime: str = "docker"
+    #: Whether to read one bootstrap record from the parent's pipe at startup. Off by default: the
+    #: daemon must not silently consume the stdin of a process that never meant to send anything, so a
+    #: launcher opts in explicitly. The flag carries no secret -- only the promise that a record is
+    #: coming.
+    read_bootstrap_stdin: bool = False
     #: Hosts a request may carry in ``Host`` and still be trusted. ``None`` derives the loopback set.
     #: Loopback binding alone does not stop a DNS-rebinding style attack, so this is validated.
     allowed_hosts: tuple[str, ...] | None = None
@@ -122,6 +132,46 @@ class Settings:
             if (candidate / "index.html").is_file():
                 return candidate
         return None
+
+
+def read_bootstrap_line() -> bytes:
+    """Read at most one bounded line from the parent pipe, or nothing at all.
+
+    Called once, at startup. The read runs in a thread with a short deadline so a parent that says
+    nothing cannot stall the daemon, and the byte limit is enforced at the read itself rather than
+    after it: an unbounded line must never be buffered.
+    """
+    result: dict[str, bytes] = {}
+
+    def reader() -> None:
+        try:
+            result["line"] = sys.stdin.buffer.readline(BOOTSTRAP_RECORD_LIMIT + 1)
+        except (OSError, ValueError, AttributeError):
+            result["line"] = b""
+
+    thread = threading.Thread(target=reader, name="bootstrap-stdin", daemon=True)
+    thread.start()
+    thread.join(timeout=2.0)
+    return result.get("line", b"")
+
+
+def ingest_bootstrap_line(app: FastAPI, line: bytes) -> bool:
+    """Register the parent's bootstrap capability, or refuse it explicitly. Returns whether it stuck.
+
+    This is the one path a capability enters the daemon by, whether it came down a pipe or from a test
+    that wants to exercise the real ingest rather than a shortcut. Nothing is echoed, logged as
+    content, emitted as an event, written to SQLite, or kept: the buffer dies with this call.
+    """
+    capability = bootstrap_record(line)
+    if capability:
+        app.state.auth.register_bootstrap(capability)
+        return True
+    if line.strip():
+        # Explicit, and content-free: the parent said something we refused to accept.
+        logging.getLogger("metaharness").warning(
+            "bootstrap input was received but refused (malformed, oversized or weak)"
+        )
+    return False
 
 
 class LoopbackOnlyMiddleware:
@@ -189,20 +239,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         data_root = paths.ensure_layout(settings.data_dir)
         app.state.data_root = data_root
-        # One bootstrap capability per launch, delivered over a private channel the operator already
-        # owns: a 0600 file inside the daemon's own data root, consumed once and then deleted. It is
-        # deliberately not argv, not an inherited environment variable, not a log line, not canonical
-        # state, and not visible from inside a sandbox -- and it means no unauthenticated
-        # "give me credentials" endpoint has to exist.
-        registry: AuthRegistry = app.state.auth
-        capability = registry.issue_bootstrap()
-        bootstrap_path = data_root / "bootstrap.url"
-        bootstrap_path.write_text(
-            f"http://{settings.host}:{settings.port}/auth/bootstrap?capability={capability}\n",
-            encoding="utf-8",
-        )
-        bootstrap_path.chmod(0o600)
-        app.state.bootstrap_path = bootstrap_path
+        # The bootstrap capability arrives over the private parent->child channel -- one bounded
+        # record on stdin from the process that launched us -- or it does not arrive at all.
+        #
+        # There is deliberately NO file. Mode 0600 protects against another OS user; it does not
+        # protect against another process running under the same account, and the threat model
+        # explicitly includes a runtime, a tool process and a compromised dependency. S2A has to hold
+        # independently of sandbox strength, so the credential must not exist anywhere a same-user
+        # process can look. It is also not argv, not an inherited environment variable, not a log
+        # line, not canonical state -- and the buffer is dropped as soon as it is registered.
+        if settings.read_bootstrap_stdin:
+            ingest_bootstrap_line(app, read_bootstrap_line())
         # The store is opened here, not at import: a module that writes to disk as a side
         # effect of being imported is a module nobody can test in isolation.
         store = Store(default_db_path(settings.data_dir), data_root=settings.data_dir)
@@ -363,9 +410,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             response.headers["Cache-Control"] = "no-store"
             return response
-        path: Path | None = getattr(app.state, "bootstrap_path", None)
-        if path is not None and path.exists():
-            path.unlink(missing_ok=True)
         response = RedirectResponse("/", status_code=303)
         # HttpOnly + SameSite=Strict, opaque content. `Secure` is omitted for loopback plain HTTP
         # because a browser will not send a Secure cookie over HTTP; over a TLS transport it must be

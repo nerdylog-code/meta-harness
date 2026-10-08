@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import secrets
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,12 +28,12 @@ for extra in (REPO_ROOT, REPO_ROOT / "apps" / "daemon", REPO_ROOT / "packages" /
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from metaharness.app import Settings, create_app  # noqa: E402
+from metaharness.app import Settings, create_app, ingest_bootstrap_line  # noqa: E402
 from tests.support import (  # noqa: E402
     CSRF_HEADER,
     TEST_ORIGIN,
     authed_client,
-    bootstrap_url,
+    bootstrap_capability,
     close_clients,
     settings_for_test,
     unauth_client,
@@ -212,10 +213,9 @@ class AuthTest(unittest.TestCase):
         data_root.mkdir()
         client = TestClient(create_app(settings_for_test(data_root)))
         client.__enter__()
-        url = bootstrap_url(data_root)
+        url, _ = bootstrap_capability(client.app)
         first = client.get(url, follow_redirects=False)
         self.assertEqual(first.status_code, 303)
-        self.assertTrue((Path(data_root) / "bootstrap.url").exists() is False, "the capability file is gone")
         second = client.get(url, follow_redirects=False)
         self.assertEqual(second.status_code, 401, "a consumed capability is dead")
         client.__exit__(None, None, None)
@@ -243,7 +243,8 @@ class AuthTest(unittest.TestCase):
         data_root.mkdir()
         client = TestClient(create_app(settings_for_test(data_root)))
         client.__enter__()
-        response = client.get(bootstrap_url(data_root), follow_redirects=False)
+        url, _ = bootstrap_capability(client.app)
+        response = client.get(url, follow_redirects=False)
         self.assertEqual(response.headers.get("cache-control"), "no-store")
         self.assertEqual(response.headers.get("referrer-policy"), "no-referrer")
         cookie = response.headers.get("set-cookie") or ""
@@ -251,6 +252,48 @@ class AuthTest(unittest.TestCase):
         self.assertIn("SameSite=strict", cookie.replace("samesite", "SameSite"))
         self.assertNotIn("Secure", cookie, "loopback plain HTTP cannot use Secure, and says so")
         client.__exit__(None, None, None)
+
+    def test_f6_the_capability_never_touches_the_filesystem(self) -> None:
+        """The P1 the security review found: a 0600 file protects against another OS user, not against
+        another process under the same account, and S2A must hold independently of sandbox strength.
+
+        A unique capability is created and then searched for everywhere a same-user process could
+        look. It must occur zero times, and no bootstrap-shaped file may exist at all.
+        """
+        capability = secrets.token_urlsafe(32)
+        record = json.dumps({"type": "bootstrap", "capability": capability}).encode()
+        app = self.client.app  # type: ignore[attr-defined]
+        self.assertTrue(ingest_bootstrap_line(app, record), "the daemon accepted the record")
+        self.client.get(f"/auth/bootstrap?capability={capability}", follow_redirects=False)
+
+        # Every place a same-user process can read.
+        haystacks: dict[str, str] = {}
+        for path in self.data_root.rglob("*"):
+            if path.is_file():
+                haystacks[str(path)] = path.read_text(encoding="utf-8", errors="ignore")
+        haystacks["events"] = json.dumps(self.client.get("/v1/events?limit=200").json())
+        haystacks["environment"] = " ".join(f"{k}={v}" for k, v in os.environ.items())
+        haystacks["argv"] = " ".join(sys.argv)
+        for where, text in haystacks.items():
+            self.assertNotIn(capability, text, f"the capability leaked into {where}")
+        self.assertFalse(
+            list(self.data_root.rglob("bootstrap*")),
+            "no bootstrap-shaped file exists anywhere: the credential lives only in memory",
+        )
+
+    def test_f7_a_parent_may_hand_the_daemon_exactly_one_capability(self) -> None:
+        """Strict, bounded, one only: a second record is refused rather than silently ignored."""
+        first = secrets.token_urlsafe(32)
+        second = secrets.token_urlsafe(32)
+        app = self.client.app  # type: ignore[attr-defined]
+        self.assertTrue(
+            ingest_bootstrap_line(app, json.dumps({"type": "bootstrap", "capability": first}).encode())
+        )
+        with self.assertRaises(ValueError):
+            ingest_bootstrap_line(app, json.dumps({"type": "bootstrap", "capability": second}).encode())
+        self.assertFalse(ingest_bootstrap_line(app, b"not json at all"))
+        self.assertFalse(ingest_bootstrap_line(app, b'{"type": "bootstrap", "capability": "short"}'))
+        self.assertFalse(ingest_bootstrap_line(app, b"x" * 5000), "an oversized line is refused by the limit")
 
     def test_f5_there_is_no_endpoint_that_hands_out_authority(self) -> None:
         """The one thing that must never exist: a sandbox calling an endpoint to become authorised."""

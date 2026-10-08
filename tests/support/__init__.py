@@ -12,6 +12,8 @@ authentication off would stop proving the thing S2 exists to prove. Instead:
 
 from __future__ import annotations
 
+import json
+import secrets
 import sys
 from pathlib import Path
 from typing import Any
@@ -23,7 +25,7 @@ for extra in (REPO_ROOT / "apps" / "daemon", REPO_ROOT / "packages" / "contracts
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from metaharness.app import Settings, create_app  # noqa: E402
+from metaharness.app import Settings, create_app, ingest_bootstrap_line  # noqa: E402
 
 #: The client a TestClient speaks as; it must be trusted or the Host check would refuse every request.
 TEST_HOST = "testserver"
@@ -60,21 +62,18 @@ def settings_for_test(data_dir: str | Path, **overrides: Any) -> Settings:
     return Settings(**base)
 
 
-def bootstrap_url(data_dir: str | Path) -> str:
-    """Read the one-use capability the daemon wrote to its private file.
+def bootstrap_capability(app) -> str:
+    """Mint a capability the way a trusted parent does and feed it through the daemon's real ingest.
 
-    The file carries an absolute URL on the daemon's own host; only its path and query are used here,
-    so the cookie lands on the same origin the rest of the test speaks as. A real operator opens the
-    absolute URL, which is exactly what the desktop host does.
+    There is no file to read: the credential never touches the filesystem, because mode 0600 protects
+    against another OS user and not against another process under the same account. The test calls the
+    very function the stdin path calls, so what runs here is the production ingest.
     """
-    path = Path(data_dir) / "bootstrap.url"
-    if not path.exists():
-        raise AssertionError("the daemon did not write a bootstrap file")
-    absolute = path.read_text(encoding="utf-8").strip()
-    marker = absolute.find("/auth/bootstrap")
-    if marker < 0:
-        raise AssertionError(f"the bootstrap file does not hold a bootstrap URL: {absolute[:40]}")
-    return absolute[marker:]
+    capability = secrets.token_urlsafe(32)
+    record = json.dumps({"type": "bootstrap", "capability": capability}).encode()
+    if not ingest_bootstrap_line(app, record):
+        raise AssertionError("the daemon refused a well-formed bootstrap record")
+    return f"/auth/bootstrap?capability={capability}", capability
 
 
 #: Every client handed out, so a test can close them all: on Windows an open SQLite handle stops the
@@ -97,7 +96,8 @@ def authed_client(data_dir: str | Path, **settings_overrides: Any) -> AuthedClie
     settings = settings_for_test(data_dir, **settings_overrides)
     client = AuthedClient(create_app(settings))
     client.__enter__()
-    response = client.get(bootstrap_url(data_dir), follow_redirects=False)
+    path, _ = bootstrap_capability(client.app)
+    response = client.get(path, follow_redirects=False)
     if response.status_code != 303:
         client.__exit__(None, None, None)
         raise AssertionError(f"bootstrap failed: {response.status_code} {response.text}")
@@ -122,7 +122,7 @@ __all__ = [
     "TEST_HOST",
     "TEST_ORIGIN",
     "authed_client",
-    "bootstrap_url",
+    "bootstrap_capability",
     "settings_for_test",
     "unauth_client",
 ]

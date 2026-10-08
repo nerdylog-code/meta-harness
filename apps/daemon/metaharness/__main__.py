@@ -30,6 +30,7 @@ def main() -> int:
         # Space-separated, so `METAHARNESS_HERMES_ARGV="/path/to/hermes acp"` pins it exactly.
         hermes_argv=_argv_env("METAHARNESS_HERMES_ARGV"),
         pi_argv=_argv_env("METAHARNESS_PI_ARGV"),
+        read_bootstrap_stdin=os.environ.get("METAHARNESS_READ_BOOTSTRAP_STDIN") == "1",
     )
     uvicorn.run(create_app(settings), host=settings.host, port=settings.port, log_level="info")
     return 0

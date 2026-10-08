@@ -20,6 +20,13 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tests.support import bootstrap_capability  # noqa: E402
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT / "apps" / "daemon") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "apps" / "daemon"))
 
@@ -51,7 +58,8 @@ class LiveDaemon:
 
     def __enter__(self) -> "LiveDaemon":
         settings = Settings(host="127.0.0.1", port=self.port, data_dir=self.data_dir, serve_web=False)
-        config = uvicorn.Config(create_app(settings), host="127.0.0.1", port=self.port, log_level="warning")
+        app = create_app(settings)
+        config = uvicorn.Config(app, host="127.0.0.1", port=self.port, log_level="warning")
         self._server = uvicorn.Server(config)
         self._thread = threading.Thread(target=self._server.run, daemon=True)
         self._thread.start()
@@ -59,8 +67,10 @@ class LiveDaemon:
         while time.time() < deadline:
             if self._server.started:
                 with httpx.Client(timeout=10) as client:
-                    bootstrap_url = (Path(self.data_dir) / "bootstrap.url").read_text(encoding="utf-8").strip()
-                    bootstrap = client.get(bootstrap_url, follow_redirects=False)
+                    path, _ = bootstrap_capability(app)
+                    # This client talks to a real server, so the path needs its origin: there is no
+                    # absolute URL to read from a file any more, and that is the point.
+                    bootstrap = client.get(f"http://127.0.0.1:{self.port}{path}", follow_redirects=False)
                     if bootstrap.status_code != 303:
                         raise RuntimeError(f"real bootstrap failed: {bootstrap.status_code}")
                     self.session_cookie = client.cookies.get("mh_session") or ""

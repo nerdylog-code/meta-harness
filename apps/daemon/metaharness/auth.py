@@ -30,6 +30,7 @@ canonical state, and not readable from inside a sandbox -- and it needs no unaut
 from __future__ import annotations
 
 import hmac
+import json
 import secrets
 from contextvars import ContextVar
 import threading
@@ -44,6 +45,34 @@ CSRF_HEADER = "x-metaharness-csrf"
 #: A capability is short-lived and single-use; a session lives for the daemon's lifetime at most.
 BOOTSTRAP_TTL_S = 120.0
 SESSION_TTL_S = 12 * 3600.0
+
+#: A capability below this length is not high entropy, whoever generated it.
+MIN_CAPABILITY_CHARS = 32
+
+#: The bootstrap record from the parent is bounded: a malicious or broken parent must not be able to
+#: make the daemon buffer an unbounded line.
+BOOTSTRAP_RECORD_LIMIT = 4096
+
+
+def bootstrap_record(line: bytes) -> str | None:
+    """Parse exactly one bootstrap record from the trusted parent, or return ``None``.
+
+    Strict and silent: a wrong type, a short capability, an oversized line or invalid JSON all yield
+    ``None``, and nothing is echoed, logged, emitted or stored. The caller forgets the buffer.
+    """
+    if not line or len(line) > BOOTSTRAP_RECORD_LIMIT:
+        return None
+    try:
+        body = json.loads(line.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    if not isinstance(body, dict) or body.get("type") != "bootstrap":
+        return None
+    capability = body.get("capability")
+    if isinstance(capability, str) and len(capability) >= MIN_CAPABILITY_CHARS:
+        return capability
+    return None
+
 
 #: Methods that change state and therefore need Origin + CSRF on top of a session.
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -129,6 +158,19 @@ class AuthRegistry:
             self._bootstrap[capability] = time.time() + self.bootstrap_ttl_s
             self.bootstrap_issued += 1
         return capability
+
+    def register_bootstrap(self, capability: str, *, ttl_s: float | None = None) -> None:
+        """Register a capability the trusted parent generated and handed over privately.
+
+        The daemon does not mint it and does not write it down: one per launch, single use, short
+        life, and it exists only here.
+        """
+        if not isinstance(capability, str) or len(capability) < MIN_CAPABILITY_CHARS:
+            raise ValueError("a bootstrap capability must be a high-entropy string")
+        with self._lock:
+            if self._bootstrap:
+                raise ValueError("a bootstrap capability is already registered for this launch")
+            self._bootstrap[capability] = time.time() + (ttl_s if ttl_s is not None else self.bootstrap_ttl_s)
 
     def consume_bootstrap(self, capability: str) -> BrowserSession | None:
         """Consume a capability exactly once. An unknown, reused or expired one yields nothing."""
