@@ -146,7 +146,26 @@ fn main() {
 
             // Take the pipe out before the child moves into managed state: one owner per pipe.
             let stdout_pipe = child.stdout.take();
+            let stderr_pipe = child.stderr.take();
             app.manage(Host(Mutex::new(Some(child))));
+
+            if let Some(pipe) = stderr_pipe {
+                let reader = BufReader::new(pipe);
+                let navigator = window.clone();
+                std::thread::spawn(move || {
+                    for line in reader.lines() {
+                        let Ok(line) = line else { break };
+                        let Some(message) = line.strip_prefix('\u{1e}') else { continue };
+                        let Ok(value) = serde_json::from_str::<serde_json::Value>(message) else { continue };
+                        if value.get("type").and_then(|v| v.as_str()) == Some("bootstrap") {
+                            if let Some(url) = value.get("url").and_then(|v| v.as_str()) {
+                                let target = serde_json::to_string(url).unwrap_or_default();
+                                let _ = navigator.eval(&format!("window.location.replace({target});"));
+                            }
+                        }
+                    }
+                });
+            }
 
             if let Some(pipe) = stdout_pipe {
                 let reader = BufReader::new(pipe);
@@ -158,40 +177,7 @@ fn main() {
                             continue;
                         };
                         match status.get("status").and_then(|value| value.as_str()) {
-                            Some("started") => {
-                                let bootstrap_file = status
-                                    .get("bootstrap_file")
-                                    .and_then(|value| value.as_str());
-                                let bootstrap_url = bootstrap_file
-                                    .and_then(|path| std::fs::read_to_string(path).ok())
-                                    .map(|value| value.trim().to_string())
-                                    .filter(|value| {
-                                        let prefixes = [
-                                            format!("http://127.0.0.1:{port}/auth/bootstrap?capability="),
-                                            format!("http://localhost:{port}/auth/bootstrap?capability="),
-                                        ];
-                                        prefixes.iter().any(|prefix| {
-                                            value.strip_prefix(prefix).is_some_and(|capability| {
-                                                !capability.is_empty()
-                                                    && capability.bytes().all(|byte| {
-                                                        byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
-                                                    })
-                                            })
-                                        })
-                                    });
-                                if let Some(url) = bootstrap_url {
-                                    let target = serde_json::to_string(&url).unwrap_or_default();
-                                    let _ = navigator.eval(&format!("window.location.replace({target});"));
-                                } else {
-                                    show(
-                                        &navigator,
-                                        "<h1>Meta-Harness could not authenticate</h1>\
-                                         <p>The daemon has no fresh bootstrap capability. Close this window, \
-                                         stop the daemon, and relaunch Meta-Harness.</p>",
-                                    );
-                                }
-                                return;
-                            }
+                            Some("started") => {}
                             Some("attach_refused") => {
                                 let reason = status
                                     .get("reason")

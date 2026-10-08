@@ -33,6 +33,7 @@ import asyncio
 import json
 import os
 import re
+import secrets
 import signal
 import socket
 import sys
@@ -55,16 +56,14 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_TIMEOUT_S = 30.0
 PROBE_TIMEOUT_S = 0.8
 BOOTSTRAP_URL_RE = re.compile(r"(https?://[^\s\"']*/auth/bootstrap\?capability=)[^&\s\"']+", re.IGNORECASE)
-_BOOTSTRAP_CAPABILITY: str | None = None
+BOOTSTRAP_CAPABILITY_RE = re.compile(r"(\"capability\"\s*:\s*\")[A-Za-z0-9_-]+(\")", re.IGNORECASE)
 
 
 def redact(value: Any) -> Any:
     """Recursively redact bootstrap capabilities before anything reaches stdout or disk."""
     if isinstance(value, str):
-        clean = BOOTSTRAP_URL_RE.sub(r"\1REDACTED", value)
-        if _BOOTSTRAP_CAPABILITY:
-            clean = clean.replace(_BOOTSTRAP_CAPABILITY, "REDACTED")
-        return clean
+        value = BOOTSTRAP_URL_RE.sub(r"\1REDACTED", value)
+        return BOOTSTRAP_CAPABILITY_RE.sub(r"\1REDACTED\2", value)
     if isinstance(value, dict):
         return {key: redact(item) for key, item in value.items()}
     if isinstance(value, list):
@@ -104,29 +103,6 @@ def health(port: int, host: str = DEFAULT_HOST, timeout: float = PROBE_TIMEOUT_S
     return None
 
 
-def bootstrap_file(args: argparse.Namespace) -> Path:
-    """Resolve the daemon's private bootstrap file without reading any credential elsewhere."""
-    from metaharness.paths import data_root
-
-    root = data_root(args.data_dir).resolve()
-    return root / "bootstrap.url"
-
-
-def read_bootstrap_url(path: Path, host: str, port: int) -> str | None:
-    """Read a fresh bootstrap URL once; never include its secret in host output or logs."""
-    global _BOOTSTRAP_CAPABILITY
-    try:
-        value = path.read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-    expected_prefix = f"http://{host}:{port}/auth/bootstrap?capability="
-    capability = value[len(expected_prefix):] if value.startswith(expected_prefix) else ""
-    if not capability or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for char in capability):
-        return None
-    _BOOTSTRAP_CAPABILITY = capability
-    return value
-
-
 def port_is_occupied(port: int, host: str = DEFAULT_HOST) -> bool:
     """Is *anything* listening, ours or not?"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
@@ -138,6 +114,12 @@ def pick_free_port(host: str = DEFAULT_HOST) -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind((host, 0))
         return int(probe.getsockname()[1])
+
+
+def emit_private(payload: dict[str, Any]) -> None:
+    """Write a private parent-pipe message. Never mirror credentials into logs."""
+    sys.stderr.write("\x1e" + json.dumps(payload, ensure_ascii=False) + "\n")
+    sys.stderr.flush()
 
 
 def emit_status(log: Any, payload: dict[str, Any]) -> None:
@@ -154,9 +136,7 @@ def emit_status(log: Any, payload: dict[str, Any]) -> None:
 
 
 def child_env(args: argparse.Namespace) -> dict[str, str]:
-    """The environment the daemon is given. Deliberately small and secret-free: the shell has
-    no credential to hand over, and inventing one would be theatre (BOOK §65 lands with daemon
-    auth, a later work package)."""
+    """The daemon's launch environment; the one-use credential is sent separately over stdin."""
     env = dict(os.environ)
     env["METAHARNESS_HOST"] = args.host
     env["METAHARNESS_PORT"] = str(args.port)
@@ -252,7 +232,12 @@ async def run(args: argparse.Namespace) -> int:
 
     sup = make_supervisor()
     argv = [args.python, "-m", "metaharness"]
-    handle = await sup.spawn(argv, cwd=str(REPO_ROOT), env=child_env(args), capture=True, drain=True)
+    env = child_env(args)
+    env["METAHARNESS_READ_BOOTSTRAP_STDIN"] = "1"
+    handle = await sup.spawn(argv, cwd=str(REPO_ROOT), env=env, capture=True, drain=True)
+    capability = secrets.token_urlsafe(32)
+    bootstrap_record = json.dumps({"type": "bootstrap", "capability": capability}, separators=(",", ":")).encode("utf-8") + b"\n"
+    await sup.write_stdin(handle, bootstrap_record)
     log.write(f"spawned: {' '.join(argv)} pid={handle.pid} cwd={REPO_ROOT}\n")
     log.flush()
 
@@ -317,12 +302,8 @@ async def run(args: argparse.Namespace) -> int:
         )
         return 1
 
-    bootstrap_path = bootstrap_file(args)
-    bootstrap_url = read_bootstrap_url(bootstrap_path, args.host, args.port)
-    if bootstrap_url is None:
-        log.write("bootstrap unavailable: daemon has no fresh bootstrap file\n")
-    else:
-        log.write("fresh bootstrap available for the desktop WebView (capability redacted)\n")
+    bootstrap_url = f"http://{args.host}:{args.port}/auth/bootstrap?capability={capability}"
+    log.write("desktop authentication capability handed over privately\n")
     log.flush()
     emit_status(
         log,
@@ -331,12 +312,12 @@ async def run(args: argparse.Namespace) -> int:
             "port": args.port,
             "port_source": port_source,
             "url": f"http://{args.host}:{args.port}",
-            "bootstrap_file": str(bootstrap_path) if bootstrap_url is not None else None,
-            "bootstrap_available": bootstrap_url is not None,
+            "bootstrap_available": True,
             "pid": handle.pid,
             "log": str(log_path),
         },
     )
+    emit_private({"type": "bootstrap", "url": bootstrap_url})
 
     await wait_for_exit()
     report = await shutdown(sup, handle)

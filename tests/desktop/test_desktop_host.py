@@ -288,5 +288,6 @@ class SecretHandlingTest(unittest.TestCase):
         self.assertFalse(config.get("app", {}).get("withGlobalTauri", False), "no global IPC surface")
 
 
+
 if __name__ == "__main__":
     unittest.main()

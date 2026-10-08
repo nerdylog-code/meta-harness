@@ -128,24 +128,17 @@ def main(argv: list[str] | None = None) -> int:
         open_when_ready(f"{url}/auth/bootstrap?capability={capability}", args.host, port)
     print(f"[dev] one-use bootstrap URL: {url}/auth/bootstrap?capability={capability}")
 
-    if args.reload:
-        uvicorn.run(
-            "metaharness.app:create_app",
-            factory=True,
-            host=args.host,
-            port=port,
-            reload=True,
-            reload_dirs=[str(DAEMON_DIR)],
-        )
-    else:
-        # The launcher is the trusted parent: supply exactly one record on the private stdin pipe.
-        import io
-        original_stdin = sys.stdin
-        sys.stdin = io.TextIOWrapper(io.BytesIO(bootstrap_record))
-        try:
-            uvicorn.run(app, host=args.host, port=port, log_level="info")
-        finally:
-            sys.stdin = original_stdin
+    # The launcher is the trusted parent: supply exactly one record on the daemon stdin pipe.
+    import asyncio
+    from metaharness.app import ingest_bootstrap_line
+
+    async def serve() -> None:
+        ingest_bootstrap_line(app, bootstrap_record)
+        config = uvicorn.Config(app, host=args.host, port=port, log_level="info")
+        server = uvicorn.Server(config)
+        await server.serve()
+
+    asyncio.run(serve())
     return 0
 
 
