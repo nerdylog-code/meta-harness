@@ -59,15 +59,72 @@ BOOTSTRAP_URL_RE = re.compile(r"(https?://[^\s\"']*/auth/bootstrap\?capability=)
 BOOTSTRAP_CAPABILITY_RE = re.compile(r"(\"capability\"\s*:\s*\")[A-Za-z0-9_-]+(\")", re.IGNORECASE)
 
 
+#: Keys whose value is a credential by construction. Deliberately a tiny explicit set: redacting every
+#: field whose name merely contains "token" or "secret" would hide legitimate diagnostic metadata and
+#: make auditing harder, which is the opposite of what this is for.
+SENSITIVE_KEYS = frozenset({"capability"})
+
+#: Live secrets, in memory only. The key-aware rule cannot help when the capability appears inside an
+#: unrelated string -- an error message, a captured daemon log line -- so the host also replaces the
+#: exact live value wherever ordinary output would carry it. Never written, never printed, never
+#: shared with the private pipe's consumer. There is one bootstrap capability today; this is not a vault.
+_LIVE_SECRETS: set[str] = set()
+_LIVE_SECRETS_LOCK = threading.Lock()
+
+#: Below this length a value is not a capability, and replacing it could damage ordinary text.
+MIN_REGISTERED_SECRET_CHARS = 16
+
+
+def register_secret(secret: str) -> None:
+    """Remember a live credential so that ordinary output cannot emit it. Memory only."""
+    if not isinstance(secret, str) or len(secret) < MIN_REGISTERED_SECRET_CHARS:
+        return
+    with _LIVE_SECRETS_LOCK:
+        _LIVE_SECRETS.add(secret)
+
+
+def unregister_secret(secret: str) -> None:
+    with _LIVE_SECRETS_LOCK:
+        _LIVE_SECRETS.discard(secret)
+
+
+def clear_secrets() -> None:
+    with _LIVE_SECRETS_LOCK:
+        _LIVE_SECRETS.clear()
+
+
+def _redact_string(value: str) -> str:
+    value = BOOTSTRAP_URL_RE.sub(r"\1REDACTED", value)
+    value = BOOTSTRAP_CAPABILITY_RE.sub(r"\1REDACTED\2", value)
+    with _LIVE_SECRETS_LOCK:
+        live = tuple(_LIVE_SECRETS)
+    for secret in live:
+        value = value.replace(secret, "REDACTED")
+    return value
+
+
 def redact(value: Any) -> Any:
-    """Recursively redact bootstrap capabilities before anything reaches stdout or disk."""
+    """Redact credentials before anything reaches ordinary stdout or a log.
+
+    The key matters as much as the value. Recursing into ``{"capability": SECRET}`` turns the
+    credential into a bare string that no pattern can recognise, so a sensitive key is replaced outright
+    instead of being handed down to the string rule. Everything else recurses, and the live-secret pass
+    catches the capability when it turns up inside unrelated text.
+    """
     if isinstance(value, str):
-        value = BOOTSTRAP_URL_RE.sub(r"\1REDACTED", value)
-        return BOOTSTRAP_CAPABILITY_RE.sub(r"\1REDACTED\2", value)
+        return _redact_string(value)
     if isinstance(value, dict):
-        return {key: redact(item) for key, item in value.items()}
+        out: dict[Any, Any] = {}
+        for key, item in value.items():
+            if isinstance(key, str) and key.strip().lower() in SENSITIVE_KEYS:
+                out[key] = "REDACTED"
+            else:
+                out[key] = redact(item)
+        return out
     if isinstance(value, list):
         return [redact(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(redact(item) for item in value)
     return value
 
 
@@ -117,7 +174,14 @@ def pick_free_port(host: str = DEFAULT_HOST) -> int:
 
 
 def emit_private(payload: dict[str, Any]) -> None:
-    """Write a private parent-pipe message. Never mirror credentials into logs."""
+    """Write a private parent-pipe message.
+
+    This is the ONE intentional exception to redaction, and it must NOT route through ``redact()``: the
+    bootstrap URL is exactly what the shell needs, and redacting it here would break the handover this
+    whole channel exists for. It goes to the parent pipe and nowhere else -- not stdout, not the log,
+    not a file. If someone later "fixes" this by redacting the payload, they are removing the only path
+    the credential is allowed to travel.
+    """
     sys.stderr.write("\x1e" + json.dumps(payload, ensure_ascii=False) + "\n")
     sys.stderr.flush()
 
@@ -177,7 +241,11 @@ async def shutdown(sup: Any, handle: ProcessHandle | None) -> KillReport | None:
         await sup.close_stdin(handle)
     except Exception:  # pragma: no cover - already gone
         pass
-    return await sup.kill_tree(handle)
+    report = await sup.kill_tree(handle)
+    # The credential is no longer live once the daemon is gone, so the registry is emptied here rather
+    # than left for the process to die with.
+    clear_secrets()
+    return report
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -236,6 +304,10 @@ async def run(args: argparse.Namespace) -> int:
     env["METAHARNESS_READ_BOOTSTRAP_STDIN"] = "1"
     handle = await sup.spawn(argv, cwd=str(REPO_ROOT), env=env, capture=True, drain=True)
     capability = secrets.token_urlsafe(32)
+    # Registered before anything derived from it is built or logged, and kept for the life of the
+    # process: ordinary diagnostic paths may run much later, and the secret must stay unloggable until
+    # shutdown clears it.
+    register_secret(capability)
     bootstrap_record = json.dumps({"type": "bootstrap", "capability": capability}, separators=(",", ":")).encode("utf-8") + b"\n"
     await sup.write_stdin(handle, bootstrap_record)
     log.write(f"spawned: {' '.join(argv)} pid={handle.pid} cwd={REPO_ROOT}\n")

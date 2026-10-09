@@ -30,6 +30,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "apps" / "desktop" / "host"))
+import desktop_host as host  # noqa: E402
+
 HOST_SCRIPT = REPO / "apps" / "desktop" / "host" / "desktop_host.py"
 TAURI_DIR = REPO / "apps" / "desktop" / "src-tauri"
 
@@ -236,6 +239,86 @@ class PortCollisionTest(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertIn("loopback-only", result["reason"])
         self.assertEqual(process.returncode, 2)
+
+
+
+class RedactionTest(unittest.TestCase):
+    """Ordinary output must be unable to emit a live credential; the private pipe is the one exception.
+
+    Every assertion here fails against the previous implementation, which is the point. A key-aware rule
+    alone does not cover a capability that appears inside an unrelated string, and a suite that never
+    tried `{"capability": SECRET}` was green while the value leaked.
+    """
+
+    CANARY = "CANARY-abcdefghijklmnopqrstuvwxyz012345"
+
+    def setUp(self) -> None:
+        host.clear_secrets()
+        host.register_secret(self.CANARY)
+
+    def tearDown(self) -> None:
+        host.clear_secrets()
+
+    def test_b1_a_sensitive_key_is_redacted_outright_and_never_recursed_into(self) -> None:
+        cases = {
+            "dict": {"capability": self.CANARY},
+            "nested dict": {"nested": {"capability": self.CANARY}},
+            "nested list": {"nested": [{"capability": self.CANARY}, "runtime error contained " + self.CANARY]},
+            "url": "http://127.0.0.1:8765/auth/bootstrap?capability=" + self.CANARY,
+            "json-shaped string": '{"capability":"' + self.CANARY + '"}',
+            "unrelated error text": {"error": "failed while using " + self.CANARY},
+        }
+        for name, value in cases.items():
+            with self.subTest(case=name):
+                rendered = json.dumps(host.redact(value))
+                self.assertNotIn(self.CANARY, rendered, f"{name} still carries the capability")
+                self.assertIn("REDACTED", rendered, f"{name} was not redacted at all")
+
+    def test_b2_ordinary_emit_and_log_never_carry_the_capability(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as temp:
+            log_path = Path(temp) / "shell.log"
+            payload = {"error": self.CANARY, "capability": self.CANARY}
+            captured = io.StringIO()
+            with open(log_path, "w", encoding="utf-8") as log, redirect_stdout(captured):
+                host.emit_status(log, payload)
+            stdout_text = captured.getvalue()
+            log_text = log_path.read_text()
+        self.assertNotIn(self.CANARY, stdout_text, "the capability reached stdout")
+        self.assertNotIn(self.CANARY, log_text, "the capability reached the log")
+        self.assertIn("REDACTED", stdout_text)
+        self.assertIn("REDACTED", log_text)
+
+    def test_b3_captured_daemon_output_is_redacted_before_the_log_sees_it(self) -> None:
+        # The daemon tail is an ordinary diagnostic path and goes through the same boundary.
+        rendered = host.redact("daemon stderr: boom while handling " + self.CANARY)
+        self.assertNotIn(self.CANARY, rendered)
+        self.assertIn("REDACTED", rendered)
+
+    def test_b4_the_private_pipe_is_the_one_place_the_credential_may_travel(self) -> None:
+        """The exception is deliberate, and it is pinned so nobody "fixes" the handover away."""
+        import io
+        from contextlib import redirect_stdout
+
+        url = "http://127.0.0.1:8765/auth/bootstrap?capability=" + self.CANARY
+        private = io.StringIO()
+        stdout = io.StringIO()
+        original = sys.stderr
+        sys.stderr = private
+        try:
+            with redirect_stdout(stdout):
+                host.emit_private({"type": "bootstrap", "url": url})
+        finally:
+            sys.stderr = original
+        self.assertIn(self.CANARY, private.getvalue(), "the private pipe must carry the capability")
+        self.assertNotIn(self.CANARY, stdout.getvalue(), "ordinary stdout must not")
+
+    def test_b5_clearing_the_registry_leaves_ordinary_text_alone(self) -> None:
+        host.clear_secrets()
+        text = "ordinary unrelated diagnostic text"
+        self.assertEqual(host.redact(text), text)
 
 
 class ShutdownTest(unittest.TestCase):
