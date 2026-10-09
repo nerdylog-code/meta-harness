@@ -34,6 +34,17 @@ from typing import Any, Iterable, Sequence
 #: than pretending to support arbitrary protocols.
 ALLOWED_PORT = 443
 
+#: Explicit bounds, because a runtime chooses what it sends us and asyncio's defaults are not a
+#: policy. Oversized or malformed input is refused with bounded memory, never buffered.
+MAX_CONNECT_HEADER_BYTES = 8 * 1024
+#: A real ClientHello is a couple of kilobytes; 16 KiB is generous and, unlike a 64 KiB bound, it can
+#: actually be violated -- a TLS record length is a 16-bit field, so a limit at or above 65536 would
+#: be a check that can never fire.
+MAX_CLIENT_HELLO_BYTES = 16 * 1024
+CONNECT_TIMEOUT_S = 10.0
+HANDSHAKE_TIMEOUT_S = 10.0
+IDLE_TIMEOUT_S = 300.0
+
 #: Ranges a provider allowlist must never reach, whatever it says. Unconditional.
 FORBIDDEN_V4 = (
     ipaddress.ip_network("0.0.0.0/8"),
@@ -102,6 +113,16 @@ class EgressRecord:
             "bytes_down": self.bytes_down,
             "duration_s": round(self.duration_s, 4),
         }
+
+
+def canonical_hostname(hostname: str) -> str:
+    """Lower-case, strip a trailing dot, and leave the rest alone.
+
+    Canonicalization exists so that ``Provider.Example``, ``provider.example`` and
+    ``provider.example.`` are one name -- which is what a comparison between a CONNECT target and a
+    TLS SNI needs to be meaningful.
+    """
+    return hostname.strip().lower().rstrip(".")
 
 
 def forbidden_reason(address: str) -> str | None:
@@ -255,24 +276,56 @@ class EgressBroker:
         return Decision(True, "allowed", hostname, port, tuple(addresses))
 
     def check_sni(self, decision: Decision, sni: str | None) -> str | None:
-        """Bind the tunnel to the hostname that was allowed.
+        """Bind the tunnel to the hostname that was CONNECTed -- exactly that one.
 
-        An absent or mismatched SNI means the CONNECT would become a tunnel to something else, so it is
-        refused rather than trusted.
+        Two different questions are asked of two different things, and conflating them was a real
+        bug: the allowlist decides whether the CONNECT target may be attempted, and this decides
+        whether TLS actually intends that same host. Asking only "is this SNI somewhere on the
+        allowlist?" would let ``CONNECT a.provider.com`` be used as a tunnel to ``b.provider.com``,
+        which is a co-hosted virtual host the operator never authorised for that connection.
         """
         if not sni:
-            return "the TLS ClientHello carried no SNI, so the tunnel cannot be bound to the allowed host"
-        if not self.allowlist.matches(sni):
-            return f"the TLS SNI {sni!r} is not the host that was allowed ({decision.hostname})"
+            return "the TLS ClientHello carried no SNI, so the tunnel cannot be bound to the CONNECTed host"
+        if canonical_hostname(sni) != canonical_hostname(decision.hostname):
+            return (
+                f"the TLS SNI {sni!r} is not the host that was CONNECTed "
+                f"({decision.hostname}); a tunnel is bound to one host, not to the allowlist"
+            )
         return None
 
     # ------------------------------------------------------------------ tunnelling
 
+    async def read_client_hello(self, reader: asyncio.StreamReader) -> bytes | None:
+        """Read one bounded ClientHello record, or ``None`` when it cannot be read safely."""
+        try:
+            head = await asyncio.wait_for(reader.readexactly(5), timeout=HANDSHAKE_TIMEOUT_S)
+        except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionError, OSError):
+            return None
+        length = struct.unpack("!H", head[3:5])[0]
+        if length <= 0 or length > MAX_CLIENT_HELLO_BYTES:
+            return None
+        try:
+            body = await asyncio.wait_for(reader.readexactly(length), timeout=HANDSHAKE_TIMEOUT_S)
+        except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionError, OSError):
+            return None
+        return head + body
+
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        """Serve one CONNECT request from the sandbox and tunnel it if it passes every check."""
+        """Serve one CONNECT request from the sandbox and tunnel it if it passes every check.
+
+        The ordering is the protocol, and getting it wrong deadlocks a standard client: a proxy is
+        expected to answer ``200 Connection Established`` first and only then receive TLS. What must
+        NOT happen before the SNI check is opening the upstream -- answering 200 means "we will
+        carry your TLS", not "we have already connected somewhere". If the SNI turns out not to bind,
+        the tunnel is closed rather than answered with an HTTP error, because a 403 written into an
+        established tunnel is noise to a TLS client.
+        """
         record: EgressRecord | None = None
         try:
-            header = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=10)
+            header = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=CONNECT_TIMEOUT_S)
+            if len(header) > MAX_CONNECT_HEADER_BYTES:
+                await self._refuse(writer, "the CONNECT header is too large", "oversized")
+                return
             request_line = header.split(b"\r\n", 1)[0].decode("latin-1", errors="replace")
             parts = request_line.split()
             if len(parts) < 2 or parts[0].upper() != "CONNECT":
@@ -282,19 +335,26 @@ class EgressBroker:
             hostname, _, port_text = target.rpartition(":")
             port = int(port_text) if port_text.isdigit() else 0
             decision = self.decide(hostname, port)
-            record = EgressRecord(hostname, port, "allowed" if decision.allowed else "refused", decision.reason, decision.resolved)
+            record = EgressRecord(
+                hostname, port, "allowed" if decision.allowed else "refused", decision.reason, decision.resolved
+            )
             if not decision.allowed:
                 self.refusals += 1
                 self.records.append(record)
                 await self._refuse(writer, decision.reason, target)
                 return
 
-            # The TLS ClientHello arrives first; the tunnel is only opened once its SNI has been
-            # checked, so nothing reaches a co-hosted service by accident.
-            hello = await asyncio.wait_for(reader.readexactly(5), timeout=10)
-            length = struct.unpack("!H", hello[3:5])[0]
-            body = await asyncio.wait_for(reader.readexactly(length), timeout=10)
-            client_hello = hello + body
+            # 200 first, as a proxy must. The upstream is still unopened at this point.
+            writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            await writer.drain()
+
+            client_hello = await self.read_client_hello(reader)
+            if client_hello is None:
+                self.refusals += 1
+                record.decision = "refused"
+                record.reason = "the TLS ClientHello was absent, oversized or malformed"
+                self.records.append(record)
+                return
             sni = sni_from_client_hello(client_hello)
             record.sni = sni
             mismatch = self.check_sni(decision, sni)
@@ -303,13 +363,10 @@ class EgressBroker:
                 record.decision = "refused"
                 record.reason = mismatch
                 self.records.append(record)
-                await self._refuse(writer, mismatch, target)
                 return
 
             upstream = await asyncio.open_connection(decision.resolved[0], port)
             self.tunnels += 1
-            writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-            await writer.drain()
             upstream[1].write(client_hello)
             await upstream[1].drain()
             up, down = await self._pump(reader, writer, upstream[0], upstream[1])

@@ -237,9 +237,16 @@ class BrokerTransportTest(unittest.TestCase):
         asyncio.run(scenario())
 
     def test_a_connect_without_sni_is_refused_before_any_tunnel(self) -> None:
-        """An unbound CONNECT is exactly the tunnel this defends against."""
+        """An unbound CONNECT is exactly the tunnel this defends against.
 
-        async def scenario() -> None:
+        The refusal now comes after the ``200``, because that is the order a proxy must speak: a
+        standard client waits for 200 before it will send TLS, so reading the ClientHello first would
+        simply deadlock it. What must hold is the security property, not the shape of the refusal:
+        answering 200 promises to carry the TLS, it does not open anything upstream. So the assertions
+        that matter are that no tunnel was opened and that the refusal names the missing binding.
+        """
+
+        async def scenario() -> tuple[bytes, int]:
             broker = EgressBroker(
                 allowlist=HostAllowlist(["api.provider.com"]),
                 resolver=resolver_for({"api.provider.com": ["93.184.216.34"]}),
@@ -250,18 +257,83 @@ class BrokerTransportTest(unittest.TestCase):
                 reader, writer = await asyncio.open_unix_connection(socket_path)
                 writer.write(b"CONNECT api.provider.com:443 HTTP/1.1\r\n\r\n")
                 await writer.drain()
+                established = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=5)
                 writer.write(client_hello(None))
                 await writer.drain()
-                response = await asyncio.wait_for(reader.read(), timeout=5)
+                await asyncio.sleep(0.05)
+                tunnels = broker.tunnels
+                refused = broker.records[-1].reason if broker.records else ""
                 writer.close()
                 server.close()
                 await server.wait_closed()
-            self.assertIn(b"403", response)
-            self.assertIn(b"no SNI", response)
-            self.assertEqual(broker.tunnels, 0, "no tunnel was opened")
+            return established, tunnels, refused
 
-        asyncio.run(scenario())
+        established, tunnels, refused = asyncio.run(scenario())
+        self.assertIn(b"200 Connection Established", established, "the proxy answers after the CONNECT")
+        self.assertEqual(tunnels, 0, "no tunnel was opened for a CONNECT that never bound to a host")
+        self.assertIn("no SNI", refused, "and the refusal names the missing binding")
 
+    def test_both_allowed_hosts_still_bind_one_tunnel_to_one_them(self) -> None:
+        """The mandatory negative: two allowed hosts must not become interchangeable.
+
+        `CONNECT a` with `SNI b` used to pass, because the check asked whether the SNI was *somewhere*
+        on the allowlist. That turns a CONNECT to one approved host into a tunnel to another co-hosted
+        approved virtual host, which is authorisation the operator never gave.
+        """
+        broker = EgressBroker(
+            allowlist=HostAllowlist(["a.provider.com", "b.provider.com"]),
+            resolver=resolver_for({"a.provider.com": ["93.184.216.34"], "b.provider.com": ["93.184.216.35"]}),
+        )
+        decision = broker.decide("a.provider.com", 443)
+        self.assertTrue(decision.allowed, "the CONNECT target itself is allowed")
+        self.assertIsNone(broker.check_sni(decision, "a.provider.com"), "the TLS intends the same host")
+        mismatch = broker.check_sni(decision, "b.provider.com")
+        self.assertIsNotNone(mismatch, "a co-hosted allowed host is still a different host")
+        self.assertIn("not the host that was CONNECTed", mismatch or "")
+        # Canonicalization must not widen this: the same name in other clothes still matches, and a
+        # different name never does.
+        self.assertIsNone(broker.check_sni(decision, "A.Provider.COM."), "case and trailing dot are the same name")
+        self.assertIsNotNone(broker.check_sni(decision, "a.provider.com.evil.test"), "a longer name is not this name")
+
+    def test_standard_client_sequencing_works(self) -> None:
+        """A standard HTTPS proxy client sends CONNECT, waits for 200, and only then starts TLS.
+
+        Reading the ClientHello before answering would deadlock exactly this client, so the ordering is
+        a protocol requirement rather than a style choice.
+        """
+
+        async def scenario() -> tuple[bytes, list[str]]:
+            broker = EgressBroker(
+                allowlist=HostAllowlist(["api.provider.com"]),
+                resolver=resolver_for({"api.provider.com": ["93.184.216.34"]}),
+            )
+            with tempfile.TemporaryDirectory() as tmp:
+                socket_path = str(Path(tmp) / "egress.sock")
+                server = await broker.serve_unix(socket_path)
+                reader, writer = await asyncio.open_unix_connection(socket_path)
+                writer.write(b"CONNECT api.provider.com:443 HTTP/1.1\r\n\r\n")
+                await writer.drain()
+                # The client now WAITS, exactly as a real one does. If the broker were waiting for the
+                # ClientHello first, this read would time out and the test would fail.
+                established = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=5)
+                # The ordering is what this proves: the 200 arrived while the broker had not yet seen
+                # any TLS, so a standard client's wait is satisfied. Reaching an upstream is a separate
+                # concern and cannot be asserted offline, so the connection is simply closed.
+                writer.write(client_hello("api.provider.com"))
+                await writer.drain()
+                await asyncio.sleep(0.05)
+                reasons = [r.reason for r in broker.records]
+                writer.close()
+                server.close()
+                await server.wait_closed()
+            return established, reasons
+
+        established, reasons = asyncio.run(scenario())
+        self.assertIn(b"200 Connection Established", established)
+        self.assertFalse(
+            any("SNI" in reason for reason in reasons),
+            f"the SNI stage accepted the bound hello, so no SNI refusal may appear: {reasons}",
+        )
 
 class EnforcementLevelTest(unittest.TestCase):
     def test_the_levels_are_honest(self) -> None:

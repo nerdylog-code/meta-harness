@@ -84,6 +84,12 @@ PUBLIC_PREFIXES = ("/assets/",)
 #: Everything under this prefix requires a session, reads included.
 PROTECTED_PREFIXES = ("/v1/",)
 
+#: Exact paths that are protected even though they sit outside the API prefix. The legacy websocket
+#: alias is here for a reason worth remembering: a canonical route was protected and its historical
+#: alias was not, so the alias quietly became a side door to the event stream. Protecting one and
+#: forgetting the other is exactly the mistake this list exists to prevent.
+PROTECTED_PATHS = frozenset({"/events/ws"})
+
 
 #: The actor for the work happening right now. Set by the middleware for a request and reset when it
 #: ends, so an event created anywhere inside that request records who caused it without every call
@@ -249,7 +255,12 @@ def is_public(path: str) -> bool:
 
 
 def is_protected(path: str) -> bool:
-    return any(path.startswith(prefix) for prefix in PROTECTED_PREFIXES)
+    """A path needs a session if it is the API, or one of the exact paths listed above.
+
+    Note what this replaces: a single prefix check meant anything not under `/v1/` and not explicitly
+    public fell through to the application -- and the legacy websocket alias did exactly that.
+    """
+    return path in PROTECTED_PATHS or any(path.startswith(prefix) for prefix in PROTECTED_PREFIXES)
 
 
 def host_is_allowed(host_header: str | None, allowed_hosts: Collection[str]) -> bool:
