@@ -314,11 +314,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     app.state.shutdown_error = str(exc)
                 store.close()
 
+    # The interactive documentation routes are off. An internal control plane has no reason to publish
+    # its entire schema to an unauthenticated caller, and /docs answered 200 on a daemon whose whole
+    # point is that reaching the port is not enough.
     app = FastAPI(
         title="Meta-Harness",
         version=VERSION,
         description="Local-first control plane for heterogeneous AI agents.",
         lifespan=lifespan,
+        openapi_url=None,
+        docs_url=None,
+        redoc_url=None,
     )
     app.state.bus = None
     app.state.store = None
@@ -370,7 +376,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
         return payload
 
-    @app.get("/health")
+    @app.get("/health", include_in_schema=False)
     def health() -> dict[str, Any]:
         """Public liveness only. Detailed diagnostics moved behind authentication: a public endpoint
         that names the data root, the store path and the bundle path tells an unauthenticated caller
@@ -382,15 +388,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "auth_required": True,
         }
 
-    @app.get("/health")
-    def health() -> dict[str, Any]:
-        """Public liveness. Deliberately not the whole picture.
-
-        The full payload carries the data root, the web bundle path, a git sha and event counters --
-        useful to an operator, and unnecessary information for anyone unauthenticated. Those fields
-        stay behind /v1/system/health.
-        """
-        return {"status": "ok", "service": "meta-harness", "version": VERSION, "auth_required": True}
 
     @app.get("/version")
     def version() -> dict[str, Any]:

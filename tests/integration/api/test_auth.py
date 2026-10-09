@@ -29,6 +29,7 @@ for extra in (REPO_ROOT, REPO_ROOT / "apps" / "daemon", REPO_ROOT / "packages" /
 from fastapi.testclient import TestClient  # noqa: E402
 
 from metaharness.app import Settings, create_app, ingest_bootstrap_line  # noqa: E402
+from metaharness.auth import is_protected  # noqa: E402
 from tests.support import (  # noqa: E402
     CSRF_HEADER,
     TEST_ORIGIN,
@@ -294,6 +295,42 @@ class AuthTest(unittest.TestCase):
         self.assertFalse(ingest_bootstrap_line(app, b"not json at all"))
         self.assertFalse(ingest_bootstrap_line(app, b'{"type": "bootstrap", "capability": "short"}'))
         self.assertFalse(ingest_bootstrap_line(app, b"x" * 5000), "an oversized line is refused by the limit")
+
+    def test_h1_every_route_is_either_public_or_protected(self) -> None:
+        """A route nobody classified must fail here.
+
+        The legacy websocket alias reached the event stream unauthenticated because classification was
+        a single prefix and nothing made the omission visible. This is the omission becoming visible:
+        the public surface is an explicit list, and anything left unprotected that is not on it -- a
+        new API path, a new websocket, a future mount -- fails the test rather than quietly shipping.
+
+        The documentation routes are absent on purpose. /docs answered 200 on a daemon whose whole
+        point is that reaching the port is not enough, and an internal control plane has no reason to
+        publish its schema to an unauthenticated caller.
+        """
+        app = self.client.app  # type: ignore[attr-defined]
+        public = {"/", "/health", "/version", "/auth/bootstrap", "/favicon.ico"}
+        unprotected: list[str] = []
+        for route in app.routes:
+            path = getattr(route, "path", "")
+            if not path or is_protected(path) or path in public or path.startswith("/assets"):
+                continue
+            unprotected.append(f"{path} ({type(route).__name__})")
+        self.assertEqual(
+            unprotected,
+            [],
+            f"these routes are neither PUBLIC nor PROTECTED, so the gate does not cover them: {unprotected}",
+        )
+
+    def test_h2_the_public_surface_does_not_leak_machine_detail(self) -> None:
+        """The unauthenticated routes carry liveness and version, and nothing about the machine."""
+        for path in ("/health", "/version"):
+            payload = self.client.get(path).json()
+            joined = json.dumps(payload).lower()
+            for forbidden in ("data_root", "web_bundle", "platform", "python", "git_sha"):
+                self.assertNotIn(forbidden, joined, f"{path} exposes {forbidden}")
+        self.assertEqual(self.client.get("/docs").status_code, 404, "the schema is not published")
+        self.assertEqual(self.client.get("/openapi.json").status_code, 404, "the schema is not published")
 
     def test_f5_there_is_no_endpoint_that_hands_out_authority(self) -> None:
         """The one thing that must never exist: a sandbox calling an endpoint to become authorised."""
