@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import socket
 import struct
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -354,3 +356,147 @@ class EnforcementLevelTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+class PeerReader:
+    """A tunnel end whose bytes arrive on a schedule the test owns.
+
+    The pump is the unit under test, so it is driven directly: a real upstream is refused by the
+    broker's own policy (loopback is never allowed), and mocking the tunnel away would leave the idle
+    logic unexercised. This shape was verified by hand -- it forwarded 96 one-way bytes while the
+    opposite peer stayed silent -- so the harness is known to work before a single assertion is written.
+    """
+
+    def __init__(self, script=(), eof_after: bool = False) -> None:
+        self.script = list(script)
+        self.eof_after = eof_after
+        self.reads = 0
+
+    async def read(self, _n: int) -> bytes:
+        self.reads += 1
+        if not self.script:
+            if self.eof_after:
+                return b""  # a real EOF: this forwarding loop ends normally
+            # No EOF. The peer stays open and silent, so only the idle clock can end this side -- which
+            # is what keeps "went quiet" and "was closed" distinguishable.
+            await asyncio.sleep(3600.0)
+            return b""
+        delay, chunk = self.script.pop(0)
+        await asyncio.sleep(delay)
+        return chunk
+
+
+class PeerWriter:
+    """Collects what the pump forwarded: the buffer is evidence that bytes reached the peer."""
+
+    def __init__(self) -> None:
+        self.bytes = bytearray()
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        self.bytes.extend(data)
+
+    async def drain(self) -> None:
+        await asyncio.sleep(0)
+
+    def can_write_eof(self) -> bool:
+        # A fake has no transport-level half-close, so the pump must cope with its absence. The
+        # ownership rule still has to hold: returning from a forward must not close anything.
+        return False
+
+    def write_eof(self) -> None:  # pragma: no cover - only called when can_write_eof() is True
+        self.closed = True
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class IdleTimeoutTest(unittest.TestCase):
+    """Idle means silence in BOTH directions: a byte either way resets ONE shared clock.
+
+    Each case injects a small timeout and is run under a hard outer bound, so a broken implementation
+    becomes a red test rather than a hung suite.
+    """
+
+    IDLE = 0.20
+
+    def new_broker(self) -> EgressBroker:
+        return EgressBroker(allowlist=HostAllowlist(["api.provider.com"]), idle_timeout_s=self.IDLE)
+
+    def drive(self, client: PeerReader, upstream: PeerReader):
+        broker = self.new_broker()
+        client_out, upstream_out = PeerWriter(), PeerWriter()
+
+        async def scenario():
+            return await asyncio.wait_for(
+                broker._pump(client, client_out, upstream, upstream_out), timeout=3.0
+            )
+
+        up, down, idle = asyncio.run(scenario())
+        return broker, up, down, idle, client_out, upstream_out
+
+    def test_c1_a_completely_idle_tunnel_closes_once(self) -> None:
+        started = time.monotonic()
+        broker, up, down, idle, client_out, upstream_out = self.drive(PeerReader(), PeerReader())
+        elapsed = time.monotonic() - started
+        self.assertTrue(idle, "an idle tunnel must close")
+        self.assertEqual(broker.idle_closures, 1, "counted exactly once")
+        self.assertEqual((up, down), (0, 0))
+        self.assertGreaterEqual(elapsed, self.IDLE * 0.5, f"closed too early: {elapsed:.3f}s")
+        self.assertLess(elapsed, 2.0, f"did not close on the idle clock: {elapsed:.3f}s")
+        self.assertTrue(client_out.closed and upstream_out.closed, "both sides are closed")
+
+    def test_c2_download_only_survives_a_silent_client(self) -> None:
+        """The authoritative anti-per-direction-timeout proof.
+
+        The client sends nothing for the whole run while the server streams for longer than one idle
+        window. A timeout per direction would kill this -- and a long response with a quiet client is
+        exactly what that breaks in production.
+        """
+        broker, up, down, idle, _, _ = self.drive(PeerReader(), PeerReader([(0.07, b"B" * 24)] * 4))
+        self.assertEqual(down, 96, f"the whole download was forwarded: {down}")
+        self.assertEqual(up, 0, "the client really sent nothing")
+        self.assertTrue(idle, "silence after the chunks still ends the tunnel")
+        self.assertEqual(broker.idle_closures, 1)
+
+    def test_c3_upload_only_survives_a_silent_server(self) -> None:
+        broker, up, down, idle, _, _ = self.drive(PeerReader([(0.07, b"A" * 24)] * 4), PeerReader())
+        self.assertEqual(up, 96, f"the whole upload was forwarded: {up}")
+        self.assertEqual(down, 0, "the server really sent nothing")
+        self.assertTrue(idle)
+
+    def test_c4_intermittent_traffic_both_ways_then_silence(self) -> None:
+        broker, up, down, idle, _, _ = self.drive(
+            PeerReader([(0.05, b"U" * 10)] * 4), PeerReader([(0.05, b"D" * 10)] * 4)
+        )
+        self.assertEqual(up, 40, f"upstream traffic forwarded: {up}")
+        self.assertEqual(down, 40, f"client traffic forwarded: {down}")
+        self.assertTrue(idle, "once both sides stop, the tunnel closes")
+        self.assertEqual(broker.idle_closures, 1, "counted once, not once per direction")
+
+    def test_c5_a_full_normal_close_is_not_an_idle_timeout(self) -> None:
+        """Both loops reach EOF before the deadline, which is what normal completion looks like.
+
+        One-sided EOF is deliberately not asserted: TCP half-close is legitimate, and if one side closes
+        while the other stays open and silent, an eventual idle timeout is correct.
+        """
+        broker, _, _, idle, _, _ = self.drive(PeerReader(eof_after=True), PeerReader(eof_after=True))
+        self.assertFalse(idle, "both peers closing is a normal ending, not a timeout")
+        self.assertEqual(broker.idle_closures, 0, "a clean close counts no idle closure")
+
+    def test_c6_byte_accounting_survives_the_timeout(self) -> None:
+        _, up, down, idle, _, _ = self.drive(PeerReader([(0.0, b"A" * 37)]), PeerReader([(0.0, b"B" * 53)]))
+        self.assertEqual(up, 37, f"upload bytes preserved: {up}")
+        self.assertEqual(down, 53, f"download bytes preserved: {down}")
+        self.assertTrue(idle)
+
+    def test_c7_no_pump_or_watchdog_task_outlives_the_tunnel(self) -> None:
+        async def scenario() -> list[str]:
+            broker = EgressBroker(allowlist=HostAllowlist(["api.provider.com"]), idle_timeout_s=0.15)
+            baseline = set(asyncio.all_tasks())
+            await asyncio.wait_for(
+                broker._pump(PeerReader(), PeerWriter(), PeerReader(), PeerWriter()), timeout=3.0
+            )
+            await asyncio.sleep(0)
+            return [t.get_name() for t in asyncio.all_tasks() if t not in baseline and not t.done()]
+
+        leftover = asyncio.run(scenario())
+        self.assertEqual(leftover, [], f"tasks outlived the tunnel: {leftover}")

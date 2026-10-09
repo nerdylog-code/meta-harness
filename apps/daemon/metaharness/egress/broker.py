@@ -285,6 +285,7 @@ class EgressBroker:
         allowlist: HostAllowlist,
         port: int = ALLOWED_PORT,
         resolver: Any = None,
+        idle_timeout_s: float = IDLE_TIMEOUT_S,
     ) -> None:
         self.allowlist = allowlist
         self.port = port
@@ -292,9 +293,12 @@ class EgressBroker:
         self.records: list[EgressRecord] = []
         self.refusals = 0
         self.tunnels = 0
-        #: Silence in both directions ends a tunnel; moved bytes reset the clock. Injectable so a test
-        #: can watch it happen without waiting five minutes.
-        self.idle_timeout_s = IDLE_TIMEOUT_S
+        #: Silence in BOTH directions ends a tunnel; a byte in either direction resets one shared clock.
+        #: Injected rather than mutated after construction, so a test can watch it happen in milliseconds
+        #: and production keeps its deliberate default.
+        if not isinstance(idle_timeout_s, (int, float)) or idle_timeout_s <= 0:
+            raise ValueError("idle_timeout_s must be a positive number of seconds")
+        self.idle_timeout_s = float(idle_timeout_s)
         self.idle_closures = 0
 
     # ------------------------------------------------------------------ decision
@@ -437,8 +441,11 @@ class EgressBroker:
             self.tunnels += 1
             upstream[1].write(client_hello)
             await upstream[1].drain()
-            up, down = await self._pump(reader, writer, upstream[0], upstream[1])
+            up, down, idle_timed_out = await self._pump(reader, writer, upstream[0], upstream[1])
             record.bytes_up, record.bytes_down = up, down
+            if idle_timed_out:
+                # Policy allowed this connection, so it is not a refusal: it simply stopped being used.
+                record.reason = "idle timeout"
             record.duration_s = time.time() - record.started_at
             self.records.append(record)
         except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionError, OSError) as exc:
@@ -453,30 +460,103 @@ class EgressBroker:
             except Exception:  # noqa: BLE001 - closing a broken socket is not an error worth raising
                 pass
 
-    async def _pump(self, reader, writer, up_reader, up_writer) -> tuple[int, int]:
-        async def forward(source, sink) -> int:
+    async def _pump(self, reader, writer, up_reader, up_writer) -> tuple[int, int, bool]:
+        """Move bytes both ways, and close the tunnel when BOTH directions go quiet.
+
+        Idle means no bytes moved in either direction for the timeout: a byte in either direction resets
+        ONE shared clock. That is not the same as a timeout per direction, and the difference is the
+        whole point -- a client that sends nothing while a server streams a long response is an active
+        connection, and a per-direction timeout would kill it. Only silence from both sides ends a
+        tunnel.
+
+        Returns ``(up, down, idle_timed_out)``. The flag exists so the caller can record why the tunnel
+        ended without inventing a public state for it.
+        """
+        idle = self.idle_timeout_s
+        last_activity = time.monotonic()
+        activity = asyncio.Event()
+        timed_out = False
+
+        def note_activity() -> None:
+            nonlocal last_activity
+            last_activity = time.monotonic()
+            activity.set()
+
+        # Counted outside the coroutine on purpose: an idle closure CANCELS the forwards, and a value
+        # returned from a cancelled coroutine never arrives. Bytes that really moved must still be
+        # reported when the tunnel ends by timeout rather than by EOF.
+        counted = {"up": 0, "down": 0}
+
+        async def forward(source, sink, key: str) -> None:
+            """Move bytes one way. It does NOT own the connection, and must not close it.
+
+            A directional EOF means "this side will send no more bytes". It does not mean the tunnel is
+            over: a client that finished uploading may still be waiting for a long response. Full-closing
+            the shared connection from here kills the other direction -- which is exactly the half-close
+            bug this replaces. The half-close is propagated when the transport supports it, and _pump
+            owns the final close.
+            """
             total = 0
             try:
                 while True:
                     chunk = await source.read(65536)
                     if not chunk:
-                        break
-                    total += len(chunk)
+                        if sink.can_write_eof():
+                            try:
+                                sink.write_eof()
+                            except (ConnectionError, OSError):
+                                pass
+                        return total
                     sink.write(chunk)
                     await sink.drain()
+                    counted[key] += len(chunk)
+                    # Noted only once the chunk is actually through: a destination that never drains must
+                    # not keep the tunnel alive merely by having had bytes read at it.
+                    note_activity()
             except (ConnectionError, OSError):
                 pass
-            finally:
+
+        up_task = asyncio.create_task(forward(reader, up_writer, "up"), name="egress-forward-up")
+        down_task = asyncio.create_task(forward(up_reader, writer, "down"), name="egress-forward-down")
+
+        async def watchdog() -> None:
+            nonlocal timed_out
+            while True:
+                remaining = idle - (time.monotonic() - last_activity)
+                if remaining <= 0:
+                    timed_out = True
+                    for task in (up_task, down_task):
+                        task.cancel()
+                    return
+                # The timestamp is authoritative; the event is only a wake-up so a busy tunnel is not
+                # checked on a fixed schedule. If activity lands between the clear and the wait, the
+                # next loop recomputes from the clock and does not lose it.
+                activity.clear()
                 try:
-                    sink.close()
+                    await asyncio.wait_for(activity.wait(), timeout=remaining)
+                except asyncio.TimeoutError:
+                    continue
+
+        watch_task = asyncio.create_task(watchdog(), name="egress-idle-watchdog")
+        try:
+            # The tunnel ends when BOTH directions have finished, or when the idle clock expires --
+            # never merely because one direction did.
+            await asyncio.gather(up_task, down_task, return_exceptions=True)
+        finally:
+            for task in (up_task, down_task, watch_task):
+                if not task.done():
+                    task.cancel()
+            # Await the cancellations so no pump or watchdog task outlives the tunnel.
+            await asyncio.gather(up_task, down_task, watch_task, return_exceptions=True)
+            # _pump owns the connection lifecycle: this is the one place either side is fully closed.
+            for endpoint in (writer, up_writer):
+                try:
+                    endpoint.close()
                 except Exception:  # noqa: BLE001
                     pass
-            return total
-
-        up_task = asyncio.create_task(forward(reader, up_writer))
-        down_task = asyncio.create_task(forward(up_reader, writer))
-        up, down = await asyncio.gather(up_task, down_task)
-        return up, down
+        if timed_out:
+            self.idle_closures += 1
+        return counted["up"], counted["down"], timed_out
 
     @staticmethod
     async def _refuse(writer, reason: str, target: str) -> None:
@@ -507,6 +587,7 @@ class EgressBroker:
             "port": self.port,
             "tunnels": self.tunnels,
             "refusals": self.refusals,
+            "idle_closures": self.idle_closures,
             "records": [record.as_dict() for record in self.records[-50:]],
         }
 
