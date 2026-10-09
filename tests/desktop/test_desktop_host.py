@@ -14,8 +14,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import tempfile
 import socket
+import select
 import subprocess
+
+import psutil
 import sys
 import threading
 import time
@@ -35,17 +40,86 @@ def free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def read_line_within(stream, timeout: float) -> str | None:
+    """Read one line, with a deadline that can actually fire.
+
+    ``readline()`` blocks until a line arrives, so a deadline checked around it is never reached: when
+    the writer says nothing, the check never runs. The deadline has to bound the read itself. That is
+    not a detail -- an earlier version of this file blocked here forever, the host and the daemon it
+    supervises stayed alive, and a re-run of the test exhausted the machine.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        ready, _, _ = select.select([stream], [], [], 0.25)
+        if not ready:
+            continue
+        line = stream.readline()
+        if line:
+            return line
+    return None
+
+
 def wait_line(process: subprocess.Popen, timeout: float = 60.0) -> dict:
     """Read the host's first JSON line. The host writes exactly one per state change."""
     assert process.stdout is not None
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        line = process.stdout.readline()
-        if line:
-            return json.loads(line)
-        if process.poll() is not None:
-            raise AssertionError(f"host exited ({process.returncode}) without emitting a status line")
+    line = read_line_within(process.stdout, timeout)
+    if line:
+        return json.loads(line)
+    if process.poll() is not None:
+        raise AssertionError(f"host exited ({process.returncode}) without emitting a status line")
     raise AssertionError("host emitted no status line in time")
+
+
+def kill_tree(process: subprocess.Popen) -> None:
+    """Kill the host AND the daemon it spawned.
+
+    The host supervises a real daemon, so terminating the host alone can leave the daemon running and
+    repeated runs stack up processes.
+    """
+    try:
+        parent = psutil.Process(process.pid)
+    except psutil.Error:
+        return
+    for child in parent.children(recursive=True):
+        try:
+            child.kill()
+        except psutil.Error:
+            pass
+    try:
+        parent.kill()
+    except psutil.Error:
+        pass
+
+
+def scan_for(root: Path, needle: str, *, max_file_bytes: int = 8 * 1024 * 1024, max_total_bytes: int = 64 * 1024 * 1024) -> str | None:
+    """Return the first path containing ``needle``, reading one file at a time.
+
+    A canary check answers a yes/no question; it must not read unbounded data into memory to do it.
+    The first version of this test joined every file under the checkout and all of /tmp into single
+    strings, which is why it could take the machine down.
+    """
+    if not root.exists():
+        return None
+    needle_bytes = needle.encode()
+    seen = 0
+    for path in root.rglob("*"):
+        try:
+            if not path.is_file():
+                continue
+            size = path.stat().st_size
+        except OSError:
+            continue
+        if size > max_file_bytes:
+            continue
+        seen += size
+        if seen > max_total_bytes:
+            return None
+        try:
+            if needle_bytes in path.read_bytes():
+                return str(path)
+        except OSError:
+            continue
+    return None
 
 
 def run_host(args: list[str], timeout: float = 60.0) -> dict:
@@ -168,8 +242,6 @@ class ShutdownTest(unittest.TestCase):
     """A3 — the shell owns the daemon: close the handle, the tree dies, nothing survives."""
 
     def test_a3_closing_stdin_stops_the_daemon_and_leaves_no_orphan(self) -> None:
-        import psutil
-
         port = free_port()
         data_dir = REPO / ".pytest-desktop-a3"
         process = subprocess.Popen(
@@ -277,6 +349,104 @@ class SecretHandlingTest(unittest.TestCase):
                 name = permission if isinstance(permission, str) else json.dumps(permission)
                 for forbidden in ("shell:", "fs:", "http:", "process:", "path:allow"):
                     self.assertNotIn(forbidden, name, f"{path.name} grants {name}")
+
+    def test_parent_pipe_proves_bootstrap_end_to_end_and_never_leaks(self) -> None:
+        import psutil
+
+        with tempfile.TemporaryDirectory(prefix="mh-bootstrap-proof-") as temp:
+            root = Path(temp) / "data"
+            log = root / "logs" / "desktop-shell.log"
+            port = free_port()
+            env = dict(os.environ)
+            env.pop("METAHARNESS_DATA_DIR", None)
+            host = subprocess.Popen(
+                [sys.executable, str(HOST_SCRIPT), "--port", str(port), "--data-dir", str(root), "--log", str(log), "--timeout", "45"],
+                cwd=REPO, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, bufsize=1,
+            )
+            try:
+                status = wait_line(host, timeout=60)
+                self.assertEqual(status["status"], "started", status)
+                self.assertEqual(status["port"], port)
+                assert host.stderr is not None
+                raw_private = read_line_within(host.stderr, timeout=30)
+                self.assertIsNotNone(raw_private, "the host never emitted its private message")
+                private_line = (raw_private or "").rstrip("\r\n")
+                self.assertTrue(private_line.startswith("\x1e"), repr(private_line))
+                private = json.loads(private_line[1:])
+                self.assertEqual(private.get("type"), "bootstrap")
+                url = private.get("url", "")
+                match = re.fullmatch(rf"http://127\.0\.0\.1:{port}/auth/bootstrap\?capability=([A-Za-z0-9_-]{{32,}})", url)
+                self.assertIsNotNone(match, url)
+                capability = match.group(1)
+                self.assertNotIn(capability, json.dumps(status))
+                self.assertNotIn(url, json.dumps(status))
+
+                cookie_processor = urllib.request.HTTPCookieProcessor()
+                opener = urllib.request.build_opener(cookie_processor)
+                with opener.open(url, timeout=5) as response:
+                    self.assertEqual(response.status, 200)
+                cookie_obj = next(c for c in cookie_processor.cookiejar if c.name == "mh_session")
+                self.assertTrue(cookie_obj.has_nonstandard_attr("HttpOnly"))
+                request = urllib.request.Request(f"http://127.0.0.1:{port}/v1/session", headers={"Cookie": f"mh_session={cookie_obj.value}"})
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    self.assertEqual(response.status, 200)
+                    session = json.loads(response.read())
+                self.assertEqual(session["actor"]["authentication"], "local_session")
+                with self.assertRaises(urllib.error.HTTPError) as reused:
+                    urllib.request.urlopen(url, timeout=5)
+                self.assertEqual(reused.exception.code, 401)
+
+                self.assertFalse((root / "bootstrap.url").exists())
+                self.assertFalse(any(p.name == "bootstrap_file" for p in root.rglob("*")))
+                credential_files = [p for p in root.rglob("*") if p.is_file() and any(x in p.name.lower() for x in ("bootstrap", "credential", "capability"))]
+                self.assertEqual(credential_files, [])
+
+                daemon = psutil.Process(status["pid"])
+                # One file at a time, over surfaces belonging to this run.
+                filesystem_surfaces = {
+                    "data root": root,
+                    "repository checkout": REPO,
+                    "artifacts": root / "artifacts",
+                    "canonical store": root / "data",
+                }
+                for name, where in filesystem_surfaces.items():
+                    with self.subTest(surface=name):
+                        for needle, label in ((capability, "capability"), (url, "URL")):
+                            found = scan_for(where, needle)
+                            self.assertIsNone(found, f"{label} leaked into {name} at {found}")
+                with self.subTest(surface="desktop-shell.log"):
+                    text = log.read_text(errors="ignore") if log.exists() else ""
+                    self.assertNotIn(capability, text, "capability leaked into desktop-shell.log")
+                    self.assertNotIn(url, text, "URL leaked into desktop-shell.log")
+                with self.subTest(surface="daemon ordinary log"):
+                    for path in (root / "logs").rglob("*"):
+                        if path.is_file():
+                            text = path.read_text(errors="ignore")
+                            self.assertNotIn(capability, text, f"capability leaked into {path}")
+                            self.assertNotIn(url, text, f"URL leaked into {path}")
+                vector_surfaces = {
+                    "desktop_host argv": "\0".join(host.args),
+                    "daemon argv": "\0".join(daemon.cmdline()),
+                    "desktop_host environment": "\n".join(f"{k}={v}" for k, v in env.items()),
+                    "daemon environment": "\n".join(f"{k}={v}" for k, v in daemon.environ().items()),
+                }
+                for name, content in vector_surfaces.items():
+                    with self.subTest(surface=name):
+                        self.assertNotIn(capability, content, f"capability leaked to {name}")
+                        self.assertNotIn(url, content, f"URL leaked to {name}")
+                self.assertIn(capability, private_line)
+                self.assertIn(url, private_line)
+            finally:
+                if host.stdin and not host.stdin.closed:
+                    host.stdin.close()
+                try:
+                    host.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    pass
+                kill_tree(host)
+                if host.stderr:
+                    host.stderr.close()
 
     def test_a6_the_webview_configuration_does_not_inject_a_secret(self) -> None:
         if not TAURI_DIR.exists():
