@@ -200,12 +200,38 @@ class AuthTest(unittest.TestCase):
             self.assertNotIn("Socket secret", str(error))
 
     def test_e2_an_authenticated_websocket_receives_events(self) -> None:
-        with self.client.websocket_connect("/v1/events/ws") as socket:
+        """An authenticated socket carries a trusted browser Origin, and receives canonical frames.
+
+        The Origin is part of the call now, and deliberately so: a websocket scope has no HTTP method,
+        so the unsafe-method check never applied to it and an authenticated socket could be opened from
+        any Origin. Making the trusted Origin explicit here is the contract change being recorded, not a
+        loosened assertion.
+        """
+        with self.client.websocket_connect("/v1/events/ws", headers={"origin": TEST_ORIGIN}) as socket:
             self.client.post("/v1/missions", json={"title": "Live", "objective": "x"})
             seen = socket.receive_text()
         # The frame is a canonical envelope, not a wrapped one: it carries the event's own fields.
         self.assertIn("kind", seen)
         self.assertIn("seq", seen)
+
+    def test_e3_an_authenticated_websocket_needs_a_trusted_origin(self) -> None:
+        """The websocket Origin gate, on BOTH routes, for the hostile and the absent header.
+
+        The bug this pins: `method in UNSAFE_METHODS` was never true for a handshake, so Origin was
+        never checked and a valid session cookie was enough from any browser.
+        """
+        from starlette.websockets import WebSocketDisconnect
+
+        for route in ("/v1/events/ws", "/events/ws"):
+            for label, headers in (
+                ("hostile Origin", {"origin": "https://evil.example"}),
+                ("absent Origin", {}),
+            ):
+                with self.subTest(route=route, case=label):
+                    with self.assertRaises(WebSocketDisconnect) as refused:
+                        with self.client.websocket_connect(route, headers=headers):
+                            pass
+                    self.assertEqual(refused.exception.code, 1008)
 
     # ------------------------------------------------------------------ bootstrap
 

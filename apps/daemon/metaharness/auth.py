@@ -376,7 +376,18 @@ class AuthMiddleware:
             await self._refuse(scope, send, 401, "authentication required", websocket=True)
             return
 
-        if method in UNSAFE_METHODS:
+        if scope["type"] == "websocket":
+            # A websocket handshake carries no HTTP method, so `method in UNSAFE_METHODS` was never true
+            # for it and the Origin check silently did not apply: an authenticated socket could be opened
+            # from any Origin, which is not what this gate claims. The browser Origin is the cross-site
+            # boundary for a cookie-authenticated handshake exactly as it is for a mutation.
+            #
+            # CSRF is deliberately NOT required here. It protects an unsafe method that a browser would
+            # send on its own; a websocket is opened by script and Origin is the boundary that matters.
+            if not origin_is_allowed(headers.get("origin"), self.allowed_origins):
+                await self._refuse(scope, send, 403, "untrusted Origin on an authenticated websocket", websocket=True)
+                return
+        elif method in UNSAFE_METHODS:
             if not origin_is_allowed(headers.get("origin"), self.allowed_origins):
                 await self._refuse(scope, send, 403, "untrusted Origin on a state-changing request")
                 return
