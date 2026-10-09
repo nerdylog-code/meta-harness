@@ -51,17 +51,27 @@ class TestHealth(DaemonTestCase):
 
 
 class TestVersion(DaemonTestCase):
-    def test_version_reports_runtime(self) -> None:
+    def test_version_is_minimal_and_runtime_detail_needs_a_session(self) -> None:
+        """A deliberate change of contract, not a loosened assertion.
+
+        /version used to report the interpreter and the platform to an unauthenticated caller, which is
+        machine fingerprinting with no operational value to them. The detail was not removed -- it moved
+        to /v1/system/health, which requires a session, and this test now pins both halves: the public
+        route stays minimal, and the detail is still readable where a session exists.
+        """
         response = self.client.get("/version")
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["service"], "meta-harness")
         self.assertEqual(body["version"], VERSION)
         self.assertEqual(body["api_version"], "v1")
+        self.assertTrue(body["auth_required"])
+        for forbidden in ("python", "platform", "data_root", "web_bundle"):
+            self.assertNotIn(forbidden, body, f"public /version must not fingerprint the machine ({forbidden})")
         detail = self.client.get("/v1/system/health").json()
         self.assertTrue(detail["git_sha"], "git_sha must be present (or 'unknown')")
-        self.assertTrue(body["python"])
-        self.assertTrue(body["platform"])
+        self.assertTrue(detail["runtime"]["python"], "the interpreter is reported where a session is required")
+        self.assertTrue(detail["runtime"]["platform"], "the platform is reported where a session is required")
 
 
 class TestEventRead(DaemonTestCase):
