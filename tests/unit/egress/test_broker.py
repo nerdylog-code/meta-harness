@@ -500,3 +500,76 @@ class IdleTimeoutTest(unittest.TestCase):
 
         leftover = asyncio.run(scenario())
         self.assertEqual(leftover, [], f"tasks outlived the tunnel: {leftover}")
+
+
+class HalfCloseTest(unittest.TestCase):
+    """One direction finishing must not kill the other, proven on real TCP.
+
+    This needed real sockets and could not be shown with the scripted peers used above: a fake writer's
+    close() is a flag, while a real socket's close() ends the peer's connection. That is the whole
+    reason the ownership fix stayed unproven until now.
+    """
+
+    IDLE = 0.20
+
+    def test_d1_finishing_the_write_half_does_not_kill_the_read_half(self) -> None:
+        request = b"request-body" * 3
+        response = b"response-body" * 4
+
+        async def scenario():
+            broker = EgressBroker(allowlist=HostAllowlist(["api.provider.com"]), idle_timeout_s=self.IDLE)
+            seen: dict[str, bytes] = {}
+
+            async def client_peer(reader, writer):
+                writer.write(request)
+                await writer.drain()
+                # Finished sending. The read half stays open on purpose. write_eof() is not a
+                # coroutine -- awaiting it raises, which is how this test first failed.
+                writer.write_eof()
+                seen["response"] = await reader.read()
+                writer.close()
+                await writer.wait_closed()
+
+            async def server_peer(reader, writer):
+                seen["request"] = await reader.read()  # until EOF
+                # The delay matters: it proves the response was not already queued before the client
+                # half-closed, so the sequence really is request -> EOF -> answer.
+                await asyncio.sleep(0.05)
+                writer.write(response)
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+
+            servers = []
+            try:
+                client_srv = await asyncio.start_server(client_peer, "127.0.0.1", 0)
+                upstream_srv = await asyncio.start_server(server_peer, "127.0.0.1", 0)
+                servers = [client_srv, upstream_srv]
+                pump_client = await asyncio.open_connection(*client_srv.sockets[0].getsockname())
+                pump_up = await asyncio.open_connection(*upstream_srv.sockets[0].getsockname())
+                baseline = set(asyncio.all_tasks())
+                up, down, idle = await asyncio.wait_for(
+                    broker._pump(pump_client[0], pump_client[1], pump_up[0], pump_up[1]), timeout=2.0
+                )
+                await asyncio.sleep(0)
+                leftover = [
+                    task.get_name()
+                    for task in asyncio.all_tasks()
+                    if task not in baseline and not task.done() and task.get_name().startswith("egress-")
+                ]
+                return seen, up, down, idle, broker, leftover
+            finally:
+                for server in servers:
+                    server.close()
+                    await server.wait_closed()
+
+        seen, up, down, idle, broker, leftover = asyncio.run(scenario())
+        self.assertEqual(seen.get("request"), request, "the server read the whole request up to EOF")
+        self.assertEqual(
+            seen.get("response"), response, "the client received the response AFTER it stopped sending"
+        )
+        self.assertEqual(up, len(request), "the request was accounted")
+        self.assertEqual(down, len(response), "the response was accounted")
+        self.assertFalse(idle, "a clean two-way completion is not an idle timeout")
+        self.assertEqual(broker.idle_closures, 0)
+        self.assertEqual(leftover, [], f"tasks outlived the tunnel: {leftover}")
