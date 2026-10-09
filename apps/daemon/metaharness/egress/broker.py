@@ -4,8 +4,8 @@ Setting `HTTPS_PROXY` is not enforcement. If the runtime can ignore the variable
 socket, the network dimension is `weak`, and no amount of configuration changes that. So the broker
 is built to be a *path*, not a suggestion:
 
-* it is reachable over a **unix socket** the sandbox has mounted, while the sandbox itself runs with
-  no network at all -- no direct route exists to ignore;
+* it exposes a unix listener that a sandbox socket mount can reach, which is the primitive the
+  transport is built on -- not the transport itself;
 * it accepts only `CONNECT host:443`, so arbitrary protocols are not on offer;
 * it resolves the approved hostname **itself**, inspects every returned address, and refuses private,
   loopback, link-local, multicast, unspecified and special-purpose ranges unconditionally -- a
@@ -16,8 +16,18 @@ is built to be a *path*, not a suggestion:
 * it records the decision, the address class, bytes and duration -- and never an authorization header,
   an API key, a body, a cookie, a query string or any plaintext.
 
+IMPLEMENTED here: the policy decision engine, the unix listener primitive, the exact-host allowlist,
+DNS and private-address classification, the CONNECT protocol with its header and ClientHello bounds,
+TLS SNI binding, and enforcement-level reporting.
+
+NOT YET BUILT, and deliberately not described in the present tense: the per-session broker and socket
+lifecycle, the socket mount into a sandbox, the local TCP shim, network-namespace integration, the
+direct-route proof and the real provider proof. Until those exist, a sandbox is not contained by this
+module -- it is contained by nothing, and `HTTPS_PROXY` remains a suggestion.
+
 `allowlist` is called **strong** only when the direct route is genuinely closed. That is measured, not
-asserted, and this module is written so that the measurement has something honest to measure.
+asserted, and this module is written so that the measurement has something honest to measure. It has
+not been measured yet.
 """
 
 from __future__ import annotations
@@ -37,6 +47,9 @@ ALLOWED_PORT = 443
 #: Explicit bounds, because a runtime chooses what it sends us and asyncio's defaults are not a
 #: policy. Oversized or malformed input is refused with bounded memory, never buffered.
 MAX_CONNECT_HEADER_BYTES = 8 * 1024
+#: Delimiter and read granularity for the bounded header reader.
+_HEADER_END = b"\r\n\r\n"
+_READ_CHUNK = 4096
 #: A real ClientHello is a couple of kilobytes; 16 KiB is generous and, unlike a 64 KiB bound, it can
 #: actually be violated -- a TLS record length is a 16-bit field, so a limit at or above 65536 would
 #: be a check that can never fire.
@@ -115,14 +128,32 @@ class EgressRecord:
         }
 
 
-def canonical_hostname(hostname: str) -> str:
-    """Lower-case, strip a trailing dot, and leave the rest alone.
+def canonical_hostname(hostname: str) -> str | None:
+    """Lower-case, strip a trailing dot, and refuse anything that is not plain ASCII.
 
     Canonicalization exists so that ``Provider.Example``, ``provider.example`` and
     ``provider.example.`` are one name -- which is what a comparison between a CONNECT target and a
     TLS SNI needs to be meaningful.
+
+    What this deliberately does NOT do is resolve international names. Handling IDNA by passing
+    something to Python's resolver and calling whatever comes back a policy would make the resolver's
+    behaviour our security boundary, which is not a decision to make implicitly. Non-ASCII input is
+    refused here, and if V1 ever needs IDN providers it gets an explicit, tested conversion path.
     """
-    return hostname.strip().lower().rstrip(".")
+    candidate = hostname.strip().rstrip(".").lower()
+    if not candidate or len(candidate) > 253:
+        return None
+    try:
+        candidate.encode("ascii")
+    except UnicodeEncodeError:
+        return None
+    labels = candidate.split(".")
+    if any(not label or len(label) > 63 for label in labels):
+        return None
+    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789-_")
+    if any(char not in allowed for label in labels for char in label):
+        return None
+    return candidate
 
 
 def forbidden_reason(address: str) -> str | None:
@@ -261,6 +292,10 @@ class EgressBroker:
         self.records: list[EgressRecord] = []
         self.refusals = 0
         self.tunnels = 0
+        #: Silence in both directions ends a tunnel; moved bytes reset the clock. Injectable so a test
+        #: can watch it happen without waiting five minutes.
+        self.idle_timeout_s = IDLE_TIMEOUT_S
+        self.idle_closures = 0
 
     # ------------------------------------------------------------------ decision
 
@@ -286,7 +321,9 @@ class EgressBroker:
         """
         if not sni:
             return "the TLS ClientHello carried no SNI, so the tunnel cannot be bound to the CONNECTed host"
-        if canonical_hostname(sni) != canonical_hostname(decision.hostname):
+        canonical_sni = canonical_hostname(sni)
+        canonical_target = canonical_hostname(decision.hostname)
+        if canonical_sni is None or canonical_target is None or canonical_sni != canonical_target:
             return (
                 f"the TLS SNI {sni!r} is not the host that was CONNECTed "
                 f"({decision.hostname}); a tunnel is bound to one host, not to the allowlist"
@@ -294,6 +331,37 @@ class EgressBroker:
         return None
 
     # ------------------------------------------------------------------ tunnelling
+
+    async def read_bounded_header(self, reader: asyncio.StreamReader) -> bytes | None:
+        """Read the CONNECT header with a memory bound that is actually the bound.
+
+        ``readuntil`` is the obvious tool and the wrong one: it buffers up to StreamReader's own limit
+        before the caller gets to compare any length, so a declared 8 KiB limit would not be a
+        buffering limit at all -- and it reports an overrun as ``LimitOverrunError``, one more refusal
+        path to remember. This accumulates incrementally and stops at the declared bound plus room for
+        the delimiter, so the ceiling is a property of this code rather than of a default chosen
+        elsewhere.
+        """
+        buffer = bytearray()
+        deadline = time.monotonic() + CONNECT_TIMEOUT_S
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            try:
+                chunk = await asyncio.wait_for(reader.read(_READ_CHUNK), timeout=remaining)
+            except (asyncio.TimeoutError, asyncio.LimitOverrunError, ConnectionError, OSError):
+                return None
+            if not chunk:
+                return None
+            buffer.extend(chunk)
+            end = buffer.find(_HEADER_END)
+            if end >= 0:
+                if end + len(_HEADER_END) > MAX_CONNECT_HEADER_BYTES:
+                    return None
+                return bytes(buffer[: end + len(_HEADER_END)])
+            if len(buffer) > MAX_CONNECT_HEADER_BYTES + len(_HEADER_END):
+                return None
 
     async def read_client_hello(self, reader: asyncio.StreamReader) -> bytes | None:
         """Read one bounded ClientHello record, or ``None`` when it cannot be read safely."""
@@ -322,9 +390,9 @@ class EgressBroker:
         """
         record: EgressRecord | None = None
         try:
-            header = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=CONNECT_TIMEOUT_S)
-            if len(header) > MAX_CONNECT_HEADER_BYTES:
-                await self._refuse(writer, "the CONNECT header is too large", "oversized")
+            header = await self.read_bounded_header(reader)
+            if header is None:
+                await self._refuse(writer, "the CONNECT header was oversized, malformed or timed out", "oversized")
                 return
             request_line = header.split(b"\r\n", 1)[0].decode("latin-1", errors="replace")
             parts = request_line.split()

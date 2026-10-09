@@ -61,6 +61,20 @@ jobs:
       - name: runtime conformance suite (Pi adapter, captured wire format)
         run: uv run python scripts/test.py --suite conformance
 
+  desktop-rust:
+    name: desktop-rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: cargo check
+        run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
+
   web:
     name: web
     runs-on: ubuntu-latest

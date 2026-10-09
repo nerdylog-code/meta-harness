@@ -20,8 +20,20 @@ What lives here:
   ``Host``, requires a session on every protected path (reads included), and requires a trusted
   ``Origin`` plus a CSRF header on state-changing methods.
 
-The bootstrap capability is delivered over a private channel the operator already owns: the daemon
-writes a one-use URL into a ``0600`` file inside its own data root, and consumes and deletes it on
+The bootstrap capability is delivered over a private channel the operator already owns. A trusted
+parent -- the desktop host, or the dev launcher for a manual run -- generates the capability itself and
+hands it to the daemon as one bounded record on the child's stdin, through the process supervisor we
+already have. The daemon registers it in memory, nothing is written down, and the parent passes the
+one-use URL to the shell over a private pipe that is never mirrored to a log.
+
+There is deliberately no file. A ``0600`` file protects against another OS user; it does not protect
+against another process running under the same account, and the threat model explicitly includes a
+runtime, a tool process and a compromised dependency. S2A has to hold independently of sandbox
+strength, so the credential does not exist anywhere a same-user process can look.
+
+The text that follows is the historical description of the file-based channel, kept because the
+reasoning that rejected it belongs next to the reasoning that replaced it: the daemon once wrote a
+one-use URL into a ``0600`` file inside its own data root, and consumed and deleted it on
 first use. That path is deliberately not argv, not an environment variable, not a log line, not
 canonical state, and not readable from inside a sandbox -- and it needs no unauthenticated
 "give me credentials" endpoint, which is the thing that must never exist.

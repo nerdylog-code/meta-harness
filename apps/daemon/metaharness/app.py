@@ -382,18 +382,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "auth_required": True,
         }
 
+    @app.get("/health")
+    def health() -> dict[str, Any]:
+        """Public liveness. Deliberately not the whole picture.
+
+        The full payload carries the data root, the web bundle path, a git sha and event counters --
+        useful to an operator, and unnecessary information for anyone unauthenticated. Those fields
+        stay behind /v1/system/health.
+        """
+        return {"status": "ok", "service": "meta-harness", "version": VERSION, "auth_required": True}
+
     @app.get("/version")
     def version() -> dict[str, Any]:
-        info = runtime_info()
-        return {"service": "meta-harness", "version": VERSION, "api_version": "v1", **{
-            key: info[key] for key in ("python", "platform") if key in info
-        }}
+        """The smallest public contract that satisfies its purpose.
+
+        A public route should expose liveness and version and nothing that fingerprints the machine.
+        The interpreter and platform strings were machine detail an unauthenticated caller has no
+        operational need for, so they moved behind the authenticated health route.
+        """
+        return {"service": "meta-harness", "version": VERSION, "api_version": "v1", "auth_required": True}
 
     @app.get("/v1/system/health")
     def system_health(request: Request) -> dict[str, Any]:
         """The full picture, for an authenticated actor only."""
         payload = health_payload()
         payload["actor"] = actor_from_request(request).provenance()
+        # The machine detail that the public routes deliberately do not carry lives here, where a
+        # session is required to see it.
+        payload["runtime"] = runtime_info()
         return payload
 
     @app.get("/auth/bootstrap")
